@@ -115,6 +115,7 @@ class SyncState extends Table {
   BoolColumn get bootstrapped => boolean().withDefault(const Constant(false))();
   DateTimeColumn get lastSyncAt => dateTime().nullable()();
   TextColumn get lastError => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('idle'))();
   IntColumn get serverClockOffsetMs =>
       integer().withDefault(const Constant(0))();
 
@@ -151,11 +152,12 @@ class Conflicts extends Table {
 
 /// The local SQLite replica schema.
 ///
-/// Schema version 1 establishes the complete local-first data model. Schema
-/// version 2 adds data-preserving SQLite guards for immutable ledger fields.
-/// Later versions must add explicit migration steps in [migration.onUpgrade]
-/// rather than replacing the database, preserving queued operations and audit
-/// data.
+/// Schema version 1 establishes the local-first data model. Schema version 2
+/// adds data-preserving SQLite guards for immutable ledger fields. Schema
+/// version 3 adds durable blocked/idle synchronization status metadata without
+/// touching local domain, queue, or conflict rows. Later versions must add
+/// explicit migration steps in [migration.onUpgrade] rather than replacing the
+/// database, preserving queued operations and audit data.
 @DriftDatabase(
   tables: [
     Products,
@@ -170,7 +172,7 @@ class StokSyncDatabase extends _$StokSyncDatabase {
   StokSyncDatabase(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -180,8 +182,11 @@ class StokSyncDatabase extends _$StokSyncDatabase {
       await _ensureSyncState();
     },
     onUpgrade: (migrator, from, to) async {
-      // Version 1 is the initial schema. Keep this hook explicit so each
-      // subsequent schema version adds a data-preserving upgrade step here.
+      if (from < 3) {
+        await customStatement(
+          "ALTER TABLE sync_state ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'",
+        );
+      }
       await _createIndexes();
       await _ensureSyncState();
     },
@@ -231,7 +236,8 @@ class StokSyncDatabase extends _$StokSyncDatabase {
   Future<void> _ensureSyncState() {
     return customStatement(
       'INSERT OR IGNORE INTO sync_state '
-      '(id, cursor, bootstrapped, server_clock_offset_ms) VALUES (1, 0, 0, 0)',
+      '(id, cursor, bootstrapped, server_clock_offset_ms, status) '
+      "VALUES (1, 0, 0, 0, 'idle')",
     );
   }
 }

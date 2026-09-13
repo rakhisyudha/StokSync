@@ -56,10 +56,18 @@ final class SyncNetworkException extends SyncTransportException {
     : super('sync request could not reach the server');
 }
 
-/// Raised when no usable bearer token is available for an authenticated call.
+/// Raised when authentication cannot be established for an authenticated call.
+///
+/// [reason] is a stable, non-sensitive diagnostic code. It must never contain
+/// an access or refresh token, response body, or arbitrary exception text.
 final class SyncAuthenticationException extends SyncTransportException {
-  const SyncAuthenticationException()
-    : super('an access token is required for synchronization');
+  const SyncAuthenticationException({this.reason = 'authentication_required'})
+    : super('synchronization authentication is blocked');
+
+  final String reason;
+
+  @override
+  String toString() => 'SyncAuthenticationException(reason: $reason)';
 }
 
 /// Raised when an HTTP response cannot be interpreted as a sync error or body.

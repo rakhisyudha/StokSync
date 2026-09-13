@@ -491,7 +491,7 @@ final class DriftRemoteChangeApplier {
           : null;
       if (existing.serverCreatedAt != null &&
           metadata != null &&
-          !existing.serverCreatedAt!.toUtc().isAtSameMomentAs(metadata)) {
+          !_sameStoredDateTime(existing.serverCreatedAt!, metadata)) {
         throw _invalid(
           '$fieldPrefix.server_created_at',
           'does not match the existing canonical movement',
@@ -685,8 +685,8 @@ final class DriftRemoteChangeApplier {
         existing.delta != delta ||
         existing.kind != kind ||
         existing.note != note ||
-        !existing.occurredAt.toUtc().isAtSameMomentAs(occurredAt) ||
-        !existing.rawOccurredAt.toUtc().isAtSameMomentAs(rawOccurredAt) ||
+        !_sameStoredDateTime(existing.occurredAt, occurredAt) ||
+        !_sameStoredDateTime(existing.rawOccurredAt, rawOccurredAt) ||
         existing.clockOffsetMs != clockOffsetMs ||
         existing.countedQty != countedQty ||
         existing.reversesId != reversesId ||
@@ -721,10 +721,10 @@ final class DriftRemoteChangeApplier {
         existing.category == category &&
         existing.minStock == minStock &&
         existing.version == version &&
-        existing.updatedAt.toUtc().isAtSameMomentAs(updatedAt) &&
+        _sameStoredDateTime(existing.updatedAt, updatedAt) &&
         existing.updatedBy == updatedBy &&
         _sameInstant(existing.deletedAt, deletedAt) &&
-        existing.createdAt.toUtc().isAtSameMomentAs(createdAt);
+        _sameStoredDateTime(existing.createdAt, createdAt);
   }
 
   void _validateChangeEnvelopes(List<SyncChangeEntry> changes) {
@@ -1032,7 +1032,18 @@ bool _sameInstant(DateTime? left, DateTime? right) {
   if (left == null || right == null) {
     return left == null && right == null;
   }
-  return left.toUtc().isAtSameMomentAs(right.toUtc());
+  return _sameStoredDateTime(left, right);
+}
+
+/// Drift's default DateTime columns persist timestamps at second precision.
+/// Normalize both values before comparing replayed canonical rows so a server
+/// timestamp with fractional seconds is not mistaken for an immutable conflict
+/// after the first local write has round-tripped through SQLite.
+bool _sameStoredDateTime(DateTime left, DateTime right) {
+  const precisionMicros = Duration.microsecondsPerSecond;
+  final leftMicros = left.toUtc().microsecondsSinceEpoch;
+  final rightMicros = right.toUtc().microsecondsSinceEpoch;
+  return (leftMicros ~/ precisionMicros) == (rightMicros ~/ precisionMicros);
 }
 
 bool _preservesLocalIntent(String status) => status != _syncedStatus;

@@ -48,6 +48,28 @@ void main() {
     );
 
     test(
+      'advances past a change already persisted by push reconciliation',
+      () async {
+        final harness = _PageHarness();
+        addTearDown(harness.close);
+
+        await harness.pageApplier.applyPage(
+          harness.response(
+            changes: [harness.productChange(seq: 41)],
+            nextCursor: 41,
+          ),
+          skipSequences: const {41},
+        );
+
+        expect(await harness.cursor(), 41);
+        expect(
+          await harness.database.select(harness.database.products).get(),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
       'replaying a complete page does not duplicate rows or balance changes',
       () async {
         final harness = _PageHarness();

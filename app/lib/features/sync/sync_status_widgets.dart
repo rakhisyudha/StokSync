@@ -38,6 +38,9 @@ class LocalSyncStatusCard extends ConsumerWidget {
 /// Returns the current status label without implying that a network request
 /// has happened.
 String localSyncStatusLabel(SyncSummary summary) {
+  if (summary.status == 'blocked') {
+    return 'Sync blocked';
+  }
   final error = summary.lastError?.trim();
   if (error != null && error.isNotEmpty) {
     return 'Needs attention';
@@ -54,6 +57,11 @@ String localSyncStatusLabel(SyncSummary summary) {
 /// Returns the latest locally known sync detail for the status card.
 String localSyncLastKnownStatus(SyncSummary summary) {
   final error = summary.lastError?.trim();
+  if (summary.status == 'blocked') {
+    return error == null || error.isEmpty
+        ? 'Sync is blocked until authentication is restored. Local work is retained.'
+        : 'Sync blocked: $error';
+  }
   if (error != null && error.isNotEmpty) {
     return 'Last attempt failed: $error';
   }

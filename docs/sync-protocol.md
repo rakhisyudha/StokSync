@@ -122,6 +122,20 @@ This offset is a clock hint for later local timestamp creation; it does not
 change cursor advancement, queue selection, retry scheduling, or response
 reconciliation.
 
+The client session layer reads the current access token from the secure session
+store. If a sync request receives `401`, the session manager performs one
+refresh-token exchange and retries that exact request once with the persisted
+replacement access token. Concurrent requests share the same in-flight refresh;
+a second `401` on the retry never starts another refresh. Missing, rejected, or
+expired refresh credentials become a durable `sync_state.status = 'blocked'`
+with a safe `last_error`; claimed queue rows are released back to `queued` and
+products, movements, pending payloads, and conflicts are not deleted or reset.
+Refresh network/timeout/server failures remain retryable. A later fully applied
+authenticated sync clears the blocked status and error and records its server
+time. A session-aware reachability probe treats `401` (and a missing local
+session) as a reason to enter the sync engine, so it cannot bypass refresh or
+blocked-state persistence.
+
 ### Client queue scheduling and interruption recovery
 
 The client serializes complete push cycles with one async mutex. Each cycle
@@ -152,7 +166,13 @@ reconciliation responsibilities, not scheduler responsibilities.
 One client sync run always sends its due FIFO operation batch first. The client
 reconciles that response, applies its complete change page transactionally, and
 then repeats the same authenticated `POST /v1/sync` exchange with an empty
-`ops` array while `has_more` is true. Each follow-up request reads the cursor
+`ops` array while `has_more` is true. When an applied push result also appears
+in that response's change page, reconciliation persists the canonical
+consequence once and page application advances over that sequence without a
+second row write; the cursor still advances across the full page. This keeps
+first-time own writes safe when SQLite timestamp precision is coarser than the
+server payload, and replay after an interrupted cursor commit remains
+idempotent. Each follow-up request reads the cursor
 persisted by the previous page application rather than trusting an in-memory
 response value, so a page cannot be skipped after a crash. A follow-up must
 advance the cursor and return no operation results; an empty page must preserve

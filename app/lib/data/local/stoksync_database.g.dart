@@ -2627,6 +2627,16 @@ class $SyncStateTable extends SyncState
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('idle'),
+  );
   static const VerificationMeta _serverClockOffsetMsMeta =
       const VerificationMeta('serverClockOffsetMs');
   @override
@@ -2645,6 +2655,7 @@ class $SyncStateTable extends SyncState
     bootstrapped,
     lastSyncAt,
     lastError,
+    status,
     serverClockOffsetMs,
   ];
   @override
@@ -2692,6 +2703,12 @@ class $SyncStateTable extends SyncState
         lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
       );
     }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
     if (data.containsKey('server_clock_offset_ms')) {
       context.handle(
         _serverClockOffsetMsMeta,
@@ -2730,6 +2747,10 @@ class $SyncStateTable extends SyncState
         DriftSqlType.string,
         data['${effectivePrefix}last_error'],
       ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
       serverClockOffsetMs: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}server_clock_offset_ms'],
@@ -2749,6 +2770,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
   final bool bootstrapped;
   final DateTime? lastSyncAt;
   final String? lastError;
+  final String status;
   final int serverClockOffsetMs;
   const SyncStateData({
     required this.id,
@@ -2756,6 +2778,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
     required this.bootstrapped,
     this.lastSyncAt,
     this.lastError,
+    required this.status,
     required this.serverClockOffsetMs,
   });
   @override
@@ -2770,6 +2793,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
     if (!nullToAbsent || lastError != null) {
       map['last_error'] = Variable<String>(lastError);
     }
+    map['status'] = Variable<String>(status);
     map['server_clock_offset_ms'] = Variable<int>(serverClockOffsetMs);
     return map;
   }
@@ -2785,6 +2809,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
       lastError: lastError == null && nullToAbsent
           ? const Value.absent()
           : Value(lastError),
+      status: Value(status),
       serverClockOffsetMs: Value(serverClockOffsetMs),
     );
   }
@@ -2800,6 +2825,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
       bootstrapped: serializer.fromJson<bool>(json['bootstrapped']),
       lastSyncAt: serializer.fromJson<DateTime?>(json['lastSyncAt']),
       lastError: serializer.fromJson<String?>(json['lastError']),
+      status: serializer.fromJson<String>(json['status']),
       serverClockOffsetMs: serializer.fromJson<int>(
         json['serverClockOffsetMs'],
       ),
@@ -2814,6 +2840,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
       'bootstrapped': serializer.toJson<bool>(bootstrapped),
       'lastSyncAt': serializer.toJson<DateTime?>(lastSyncAt),
       'lastError': serializer.toJson<String?>(lastError),
+      'status': serializer.toJson<String>(status),
       'serverClockOffsetMs': serializer.toJson<int>(serverClockOffsetMs),
     };
   }
@@ -2824,6 +2851,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
     bool? bootstrapped,
     Value<DateTime?> lastSyncAt = const Value.absent(),
     Value<String?> lastError = const Value.absent(),
+    String? status,
     int? serverClockOffsetMs,
   }) => SyncStateData(
     id: id ?? this.id,
@@ -2831,6 +2859,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
     bootstrapped: bootstrapped ?? this.bootstrapped,
     lastSyncAt: lastSyncAt.present ? lastSyncAt.value : this.lastSyncAt,
     lastError: lastError.present ? lastError.value : this.lastError,
+    status: status ?? this.status,
     serverClockOffsetMs: serverClockOffsetMs ?? this.serverClockOffsetMs,
   );
   SyncStateData copyWithCompanion(SyncStateCompanion data) {
@@ -2844,6 +2873,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
           ? data.lastSyncAt.value
           : this.lastSyncAt,
       lastError: data.lastError.present ? data.lastError.value : this.lastError,
+      status: data.status.present ? data.status.value : this.status,
       serverClockOffsetMs: data.serverClockOffsetMs.present
           ? data.serverClockOffsetMs.value
           : this.serverClockOffsetMs,
@@ -2858,6 +2888,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
           ..write('bootstrapped: $bootstrapped, ')
           ..write('lastSyncAt: $lastSyncAt, ')
           ..write('lastError: $lastError, ')
+          ..write('status: $status, ')
           ..write('serverClockOffsetMs: $serverClockOffsetMs')
           ..write(')'))
         .toString();
@@ -2870,6 +2901,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
     bootstrapped,
     lastSyncAt,
     lastError,
+    status,
     serverClockOffsetMs,
   );
   @override
@@ -2881,6 +2913,7 @@ class SyncStateData extends DataClass implements Insertable<SyncStateData> {
           other.bootstrapped == this.bootstrapped &&
           other.lastSyncAt == this.lastSyncAt &&
           other.lastError == this.lastError &&
+          other.status == this.status &&
           other.serverClockOffsetMs == this.serverClockOffsetMs);
 }
 
@@ -2890,6 +2923,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
   final Value<bool> bootstrapped;
   final Value<DateTime?> lastSyncAt;
   final Value<String?> lastError;
+  final Value<String> status;
   final Value<int> serverClockOffsetMs;
   const SyncStateCompanion({
     this.id = const Value.absent(),
@@ -2897,6 +2931,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
     this.bootstrapped = const Value.absent(),
     this.lastSyncAt = const Value.absent(),
     this.lastError = const Value.absent(),
+    this.status = const Value.absent(),
     this.serverClockOffsetMs = const Value.absent(),
   });
   SyncStateCompanion.insert({
@@ -2905,6 +2940,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
     this.bootstrapped = const Value.absent(),
     this.lastSyncAt = const Value.absent(),
     this.lastError = const Value.absent(),
+    this.status = const Value.absent(),
     this.serverClockOffsetMs = const Value.absent(),
   });
   static Insertable<SyncStateData> custom({
@@ -2913,6 +2949,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
     Expression<bool>? bootstrapped,
     Expression<DateTime>? lastSyncAt,
     Expression<String>? lastError,
+    Expression<String>? status,
     Expression<int>? serverClockOffsetMs,
   }) {
     return RawValuesInsertable({
@@ -2921,6 +2958,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
       if (bootstrapped != null) 'bootstrapped': bootstrapped,
       if (lastSyncAt != null) 'last_sync_at': lastSyncAt,
       if (lastError != null) 'last_error': lastError,
+      if (status != null) 'status': status,
       if (serverClockOffsetMs != null)
         'server_clock_offset_ms': serverClockOffsetMs,
     });
@@ -2932,6 +2970,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
     Value<bool>? bootstrapped,
     Value<DateTime?>? lastSyncAt,
     Value<String?>? lastError,
+    Value<String>? status,
     Value<int>? serverClockOffsetMs,
   }) {
     return SyncStateCompanion(
@@ -2940,6 +2979,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
       bootstrapped: bootstrapped ?? this.bootstrapped,
       lastSyncAt: lastSyncAt ?? this.lastSyncAt,
       lastError: lastError ?? this.lastError,
+      status: status ?? this.status,
       serverClockOffsetMs: serverClockOffsetMs ?? this.serverClockOffsetMs,
     );
   }
@@ -2962,6 +3002,9 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
     if (lastError.present) {
       map['last_error'] = Variable<String>(lastError.value);
     }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
     if (serverClockOffsetMs.present) {
       map['server_clock_offset_ms'] = Variable<int>(serverClockOffsetMs.value);
     }
@@ -2976,6 +3019,7 @@ class SyncStateCompanion extends UpdateCompanion<SyncStateData> {
           ..write('bootstrapped: $bootstrapped, ')
           ..write('lastSyncAt: $lastSyncAt, ')
           ..write('lastError: $lastError, ')
+          ..write('status: $status, ')
           ..write('serverClockOffsetMs: $serverClockOffsetMs')
           ..write(')'))
         .toString();
@@ -5414,6 +5458,7 @@ typedef $$SyncStateTableCreateCompanionBuilder =
       Value<bool> bootstrapped,
       Value<DateTime?> lastSyncAt,
       Value<String?> lastError,
+      Value<String> status,
       Value<int> serverClockOffsetMs,
     });
 typedef $$SyncStateTableUpdateCompanionBuilder =
@@ -5423,6 +5468,7 @@ typedef $$SyncStateTableUpdateCompanionBuilder =
       Value<bool> bootstrapped,
       Value<DateTime?> lastSyncAt,
       Value<String?> lastError,
+      Value<String> status,
       Value<int> serverClockOffsetMs,
     });
 
@@ -5457,6 +5503,11 @@ class $$SyncStateTableFilterComposer
 
   ColumnFilters<String> get lastError => $composableBuilder(
     column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5500,6 +5551,11 @@ class $$SyncStateTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get serverClockOffsetMs => $composableBuilder(
     column: $table.serverClockOffsetMs,
     builder: (column) => ColumnOrderings(column),
@@ -5533,6 +5589,9 @@ class $$SyncStateTableAnnotationComposer
 
   GeneratedColumn<String> get lastError =>
       $composableBuilder(column: $table.lastError, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
 
   GeneratedColumn<int> get serverClockOffsetMs => $composableBuilder(
     column: $table.serverClockOffsetMs,
@@ -5576,6 +5635,7 @@ class $$SyncStateTableTableManager
                 Value<bool> bootstrapped = const Value.absent(),
                 Value<DateTime?> lastSyncAt = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
+                Value<String> status = const Value.absent(),
                 Value<int> serverClockOffsetMs = const Value.absent(),
               }) => SyncStateCompanion(
                 id: id,
@@ -5583,6 +5643,7 @@ class $$SyncStateTableTableManager
                 bootstrapped: bootstrapped,
                 lastSyncAt: lastSyncAt,
                 lastError: lastError,
+                status: status,
                 serverClockOffsetMs: serverClockOffsetMs,
               ),
           createCompanionCallback:
@@ -5592,6 +5653,7 @@ class $$SyncStateTableTableManager
                 Value<bool> bootstrapped = const Value.absent(),
                 Value<DateTime?> lastSyncAt = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
+                Value<String> status = const Value.absent(),
                 Value<int> serverClockOffsetMs = const Value.absent(),
               }) => SyncStateCompanion.insert(
                 id: id,
@@ -5599,6 +5661,7 @@ class $$SyncStateTableTableManager
                 bootstrapped: bootstrapped,
                 lastSyncAt: lastSyncAt,
                 lastError: lastError,
+                status: status,
                 serverClockOffsetMs: serverClockOffsetMs,
               ),
           withReferenceMapper: (p0) => p0

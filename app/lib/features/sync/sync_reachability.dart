@@ -9,19 +9,35 @@ abstract interface class SyncReachabilityProbe {
 ///
 /// The access token is sent in the same header used by sync. The server health
 /// route may be lightweight, but interface state alone never marks the service
-/// reachable. Missing tokens, transport failures, and non-2xx responses all
-/// return `false` without exposing the underlying error to the UI.
+/// reachable. A legacy token provider treats missing tokens, transport
+/// failures, and non-2xx responses as unreachable. A session-aware probe lets
+/// authentication failures enter the sync engine so refresh and durable
+/// blocked-state handling cannot be bypassed.
 final class AuthenticatedHealthReachability implements SyncReachabilityProbe {
   AuthenticatedHealthReachability({
     required Uri baseUri,
-    required SyncAccessTokenProvider accessTokenProvider,
+    SyncAccessTokenProvider? accessTokenProvider,
+    SyncSessionManager? sessionManager,
     SyncHttpRequestSender? sender,
   }) : _endpoint = _resolveHealthEndpoint(baseUri),
        _accessTokenProvider = accessTokenProvider,
-       _sender = sender ?? IoSyncHttpRequestSender();
+       _sessionManager = sessionManager,
+       _sender = sender ?? IoSyncHttpRequestSender() {
+    if (_accessTokenProvider == null && _sessionManager == null) {
+      throw ArgumentError(
+        'an accessTokenProvider or sessionManager is required',
+      );
+    }
+    if (_accessTokenProvider != null && _sessionManager != null) {
+      throw ArgumentError(
+        'provide only one of accessTokenProvider or sessionManager',
+      );
+    }
+  }
 
   final Uri _endpoint;
-  final SyncAccessTokenProvider _accessTokenProvider;
+  final SyncAccessTokenProvider? _accessTokenProvider;
+  final SyncSessionManager? _sessionManager;
   final SyncHttpRequestSender _sender;
 
   Uri get endpoint => _endpoint;
@@ -29,8 +45,22 @@ final class AuthenticatedHealthReachability implements SyncReachabilityProbe {
   @override
   Future<bool> check() async {
     final String? token;
+    final manager = _sessionManager;
+    final provider = _accessTokenProvider;
     try {
-      token = (await _accessTokenProvider())?.trim();
+      if (manager != null) {
+        token = (await manager.accessToken())?.trim();
+      } else if (provider != null) {
+        token = (await provider())?.trim();
+      } else {
+        return false;
+      }
+    } on SyncAuthenticationException {
+      // With a session manager, authentication failure is still a reason to
+      // enter the sync engine: it records durable blocked state without
+      // touching local data. A legacy token provider has no refresh path and
+      // retains the old unreachable behavior.
+      return _sessionManager != null;
     } on Object {
       return false;
     }
@@ -48,6 +78,13 @@ final class AuthenticatedHealthReachability implements SyncReachabilityProbe {
         },
         body: const <int>[],
       );
+      // A 401 proves that the service is reachable. When a session manager
+      // is present, let the sync transport perform its single refresh/retry
+      // flow instead of hiding the opportunity behind a false reachability
+      // result.
+      if (response.statusCode == 401 && _sessionManager != null) {
+        return true;
+      }
       return response.statusCode >= 200 && response.statusCode < 300;
     } on Object {
       return false;

@@ -26,14 +26,19 @@ final class DriftSyncPageApplier {
 
   /// Applies [response.changes] and advances the local cursor atomically.
   ///
-  /// A response replay whose [SyncResponse.nextCursor] already equals the
-  /// local cursor is safe: the remote applier is idempotent and the cursor
-  /// write is skipped because there is no advancement to persist.
-  Future<void> applyPage(SyncResponse response) async {
+  /// [skipSequences] identifies changes whose canonical consequences were
+  /// already persisted while reconciling applied push results in the same
+  /// response. Those entries still belong to the page and therefore still
+  /// contribute to the cursor, but are not written a second time.
+  Future<void> applyPage(
+    SyncResponse response, {
+    Set<int> skipSequences = const <int>{},
+  }) async {
     // Validate protocol-level metadata before opening a write transaction.
     // Entity payload validation remains in DriftRemoteChangeApplier so that a
     // failure after an earlier change still exercises SQLite rollback.
     response.toJson();
+    _validateSkippedSequences(response, skipSequences);
 
     await _database.transaction(() async {
       final state = await (_database.select(
@@ -44,8 +49,11 @@ final class DriftSyncPageApplier {
       }
 
       _validatePage(response, state.cursor);
+      final changesToApply = response.changes
+          .where((change) => !skipSequences.contains(change.seq))
+          .toList(growable: false);
       await _remoteChangeApplier.applyChangesInTransaction(
-        response.changes,
+        changesToApply,
         serverTime: response.serverTime,
       );
 
@@ -57,7 +65,27 @@ final class DriftSyncPageApplier {
 
   /// Alias that keeps the boundary convenient for callers treating a response
   /// as the unit of local application.
-  Future<void> apply(SyncResponse response) => applyPage(response);
+  Future<void> apply(
+    SyncResponse response, {
+    Set<int> skipSequences = const <int>{},
+  }) => applyPage(response, skipSequences: skipSequences);
+
+  void _validateSkippedSequences(
+    SyncResponse response,
+    Set<int> skipSequences,
+  ) {
+    final changeSequences = response.changes
+        .map((change) => change.seq)
+        .toSet();
+    for (final sequence in skipSequences) {
+      if (!changeSequences.contains(sequence)) {
+        throw _invalidPage(
+          'skip_sequences',
+          'contains a sequence that is not present in the response page',
+        );
+      }
+    }
+  }
 
   void _validatePage(SyncResponse response, int currentCursor) {
     if (response.nextCursor < currentCursor) {

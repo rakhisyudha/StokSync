@@ -22,11 +22,30 @@ final class DriftSyncResponseApplier {
   final DriftSyncPageApplier _pageApplier;
 
   /// Applies operation outcomes and then the complete change page.
+  ///
+  /// An applied push result can point at a change that is also present in the
+  /// response's pull page. The reconciler has already persisted that canonical
+  /// consequence, so the page applier must advance past the change without
+  /// writing it a second time. This is especially important for Drift date-time
+  /// columns, which can round-trip with less precision than the server JSON.
   Future<void> call(
     SyncResponse response,
     List<PendingSyncOperation> operations,
   ) async {
     await _responseReconciler.reconcile(response, operations);
-    await _pageApplier.applyPage(response);
+
+    final changeSequences = response.changes
+        .map((change) => change.seq)
+        .toSet();
+    final reconciledSequences = response.results
+        .where(
+          (result) =>
+              result.status == SyncOperationResultStatus.applied &&
+              result.seq != null &&
+              changeSequences.contains(result.seq),
+        )
+        .map((result) => result.seq!)
+        .toSet();
+    await _pageApplier.applyPage(response, skipSequences: reconciledSequences);
   }
 }

@@ -41,6 +41,33 @@ docker compose down -v
 ```
 
 `docker compose down -v` permanently deletes the local PostgreSQL data volume.
+
+## Two-device convergence harness
+
+Task 4.9 includes an opt-in Flutter integration test that uses two independent
+in-memory Drift replicas, the real authenticated `AuthenticatedSyncRuntime`
+composition root, HTTP sockets, and the PostgreSQL-backed API. It creates an
+account, performs deterministic offline product and movement work, synchronizes
+in both device orders, injects a transaction interruption during remote-page
+application, and verifies both replicas plus the server snapshot converge.
+
+Start PostgreSQL and apply migrations as above, then start the API with
+`server/.env` configured for that database. In a second PowerShell terminal,
+set the API URL and the same migrated database URL used by the API, for example:
+
+```powershell
+$env:STOKSYNC_TEST_API_BASE_URI = "http://127.0.0.1:8080"
+$env:STOKSYNC_TEST_DATABASE_URL = "postgres://stoksync:local-password@127.0.0.1:5432/stoksync?sslmode=disable"
+Push-Location app
+try { flutter test test/integration/two_device_convergence_test.dart } finally { Pop-Location }
+```
+
+The test is skipped when either variable is absent, so ordinary Flutter test
+runs do not require Docker. The database URL is an explicit prerequisite and
+serves as a guard against accidentally treating a fake transport or an
+unmigrated database as the live integration environment. The test creates a
+unique disposable account; it does not delete or reset shared database data.
+
 ## Product balance projection check
 
 The server keeps `product_balances` as a rebuildable read projection; the

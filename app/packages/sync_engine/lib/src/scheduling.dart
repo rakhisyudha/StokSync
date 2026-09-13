@@ -158,6 +158,17 @@ abstract interface class SyncCursorStore {
   Future<int> readCursor();
 }
 
+/// Narrow durable sync-status seam used by [SyncEngine].
+///
+/// Implementations persist only synchronization metadata. They must not
+/// delete, reset, or otherwise rewrite local products, movements, queue rows,
+/// or conflict records when authentication becomes blocked.
+abstract interface class SyncStatusStore {
+  Future<void> markBlocked({required String error});
+
+  Future<void> markSyncSucceeded(DateTime serverTime);
+}
+
 /// Applies one validated response page and persists its cursor before
 /// returning. [operations] is non-empty only for the initial push response;
 /// pagination responses always pass an empty list.
@@ -225,6 +236,7 @@ final class SyncEngine {
     SyncMutex? mutex,
     SyncBackoffPolicy? backoff,
     SyncResponseHandler? onResponse,
+    SyncStatusStore? statusStore,
     this.maxOperations = syncMaxOperations,
     this.maxChanges = syncMaxChanges,
   }) : _transport = transport,
@@ -234,7 +246,8 @@ final class SyncEngine {
        _now = now ?? _utcNow,
        _mutex = mutex ?? SyncMutex(),
        _backoff = backoff ?? SyncBackoffPolicy(),
-       _onResponse = onResponse {
+       _onResponse = onResponse,
+       _statusStore = statusStore {
     if (maxOperations <= 0 || maxOperations > syncMaxOperations) {
       throw ArgumentError.value(
         maxOperations,
@@ -259,6 +272,7 @@ final class SyncEngine {
   final SyncMutex _mutex;
   final SyncBackoffPolicy _backoff;
   final SyncResponseHandler? _onResponse;
+  final SyncStatusStore? _statusStore;
   final int maxOperations;
   final int maxChanges;
 
@@ -348,7 +362,14 @@ final class SyncEngine {
         nextResponse = await _transport.synchronize(request);
       } catch (error, stackTrace) {
         // The initial operation response has already reached the handler. No
-        // claimed operations are associated with this pull-only exchange.
+        // claimed operations are associated with this pull-only exchange, but
+        // a blocked authentication result still belongs in durable sync
+        // status.
+        await _bestEffortHandleFailure(
+          const <PendingSyncOperation>[],
+          error,
+          _now().toUtc(),
+        );
         Error.throwWithStackTrace(error, stackTrace);
       }
 
@@ -370,6 +391,7 @@ final class SyncEngine {
       response = nextResponse;
     }
 
+    await _bestEffortMarkSyncSucceeded(response.serverTime);
     return SyncCycleResult(response: initialResponse, operations: operations);
   }
 
@@ -491,6 +513,7 @@ final class SyncEngine {
             );
           }
         case SyncRetryDisposition.blocked:
+          await _bestEffortMarkBlocked(error);
           await _pendingOperations.releaseInFlight(
             operations.map((operation) => operation.opId),
           );
@@ -506,6 +529,32 @@ final class SyncEngine {
       // The original failure remains authoritative. Any rows left inflight
       // are recoverable by the next cycle, so a secondary local-write error
       // must not hide the network/protocol failure or lose the operation.
+    }
+  }
+
+  Future<void> _bestEffortMarkBlocked(Object error) async {
+    final store = _statusStore;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.markBlocked(error: _safeErrorSummary(error));
+    } on Object {
+      // The original authentication failure remains authoritative. The local
+      // queue and replica are still preserved if metadata persistence fails.
+    }
+  }
+
+  Future<void> _bestEffortMarkSyncSucceeded(DateTime serverTime) async {
+    final store = _statusStore;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.markSyncSucceeded(serverTime.toUtc());
+    } on Object {
+      // Sync data was already reconciled. A later successful cycle can retry
+      // this metadata-only clear; never roll back local domain data here.
     }
   }
 

@@ -918,9 +918,16 @@ void _assertOptionalDateTimeEquals(
   String field,
 ) {
   if (data.containsKey(key) &&
-      !_dateTime(data[key], field).isAtSameMomentAs(expected)) {
+      !_sameStoredDateTime(_dateTime(data[key], field), expected)) {
     throw _invalidResponse(field, 'does not match the local ledger row');
   }
+}
+
+bool _sameStoredDateTime(DateTime left, DateTime right) {
+  const precisionMicros = Duration.microsecondsPerSecond;
+  final leftMicros = left.toUtc().microsecondsSinceEpoch;
+  final rightMicros = right.toUtc().microsecondsSinceEpoch;
+  return (leftMicros ~/ precisionMicros) == (rightMicros ~/ precisionMicros);
 }
 
 SyncProtocolException _invalidResponse(String field, String message) {

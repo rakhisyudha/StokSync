@@ -26,6 +26,51 @@ void main() {
     });
 
     test(
+      'treats a 401 as reachable when session-aware sync can refresh',
+      () async {
+        final session = SyncSession(
+          accessToken: 'access-token',
+          refreshToken: 'refresh-token',
+          userId: '0192f1a0-0000-7000-8000-000000000001',
+          deviceId: '0192f200-0000-7000-8000-000000000001',
+          accessTokenExpiresAt: DateTime.utc(2026, 9, 13, 10, 17),
+        );
+        final probe = AuthenticatedHealthReachability(
+          baseUri: Uri.parse('https://example.test'),
+          sessionManager: SyncSessionManager(
+            store: _SessionStore(session),
+            refresher: _SessionRefresher(session),
+          ),
+          sender: _RecordingSender(
+            SyncHttpResponse(statusCode: 401, body: <int>[]),
+          ),
+        );
+
+        expect(await probe.check(), isTrue);
+      },
+    );
+
+    test(
+      'lets a missing session reach the engine so it can persist blocked state',
+      () async {
+        final sender = _RecordingSender(
+          SyncHttpResponse(statusCode: 200, body: <int>[]),
+        );
+        final probe = AuthenticatedHealthReachability(
+          baseUri: Uri.parse('https://example.test'),
+          sessionManager: SyncSessionManager(
+            store: _SessionStore(null),
+            refresher: _SessionRefresher(_sessionForTest()),
+          ),
+          sender: sender,
+        );
+
+        expect(await probe.check(), isTrue);
+        expect(sender.called, isFalse);
+      },
+    );
+
+    test(
       'treats missing token, failures, and non-2xx as unreachable',
       () async {
         final missingTokenSender = _RecordingSender(
@@ -95,4 +140,35 @@ final class _ThrowingSender implements SyncHttpRequestSender {
   }) {
     throw const SyncNetworkException();
   }
+}
+
+SyncSession _sessionForTest() {
+  return SyncSession(
+    accessToken: 'access-token',
+    refreshToken: 'refresh-token',
+    userId: '0192f1a0-0000-7000-8000-000000000001',
+    deviceId: '0192f200-0000-7000-8000-000000000001',
+    accessTokenExpiresAt: DateTime.utc(2026, 9, 13, 10, 17),
+  );
+}
+
+final class _SessionStore implements SyncSessionStore {
+  _SessionStore(this.session);
+
+  final SyncSession? session;
+
+  @override
+  Future<SyncSession?> readSession() async => session;
+
+  @override
+  Future<void> writeSession(SyncSession value) async {}
+}
+
+final class _SessionRefresher implements SyncSessionRefresher {
+  _SessionRefresher(this.session);
+
+  final SyncSession session;
+
+  @override
+  Future<SyncSession> refresh(String refreshToken) async => session;
 }

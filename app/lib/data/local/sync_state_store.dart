@@ -45,3 +45,51 @@ final class DriftSyncCursorStore implements SyncCursorStore {
     }
   }
 }
+
+/// Persists the durable synchronization status without touching replica data.
+///
+/// Authentication blockers retain every product, movement, pending operation,
+/// and conflict row. A later fully applied authenticated cycle clears only this
+/// metadata and records its server timestamp.
+final class DriftSyncStatusStore implements SyncStatusStore {
+  DriftSyncStatusStore(this._database);
+
+  static const _syncStateId = 1;
+
+  final StokSyncDatabase _database;
+
+  @override
+  Future<void> markBlocked({required String error}) async {
+    final safeError = error.trim().isEmpty
+        ? 'authentication_required'
+        : error.trim();
+    await _write(
+      SyncStateCompanion(
+        status: const Value('blocked'),
+        lastError: Value(safeError),
+      ),
+    );
+  }
+
+  @override
+  Future<void> markSyncSucceeded(DateTime serverTime) async {
+    await _write(
+      SyncStateCompanion(
+        status: const Value('idle'),
+        lastError: const Value(null),
+        lastSyncAt: Value(serverTime.toUtc()),
+      ),
+    );
+  }
+
+  Future<void> _write(SyncStateCompanion values) async {
+    final updated = await (_database.update(
+      _database.syncState,
+    )..where((state) => state.id.equals(_syncStateId))).write(values);
+    if (updated != 1) {
+      throw StateError(
+        'expected exactly one sync-state row while persisting sync status',
+      );
+    }
+  }
+}

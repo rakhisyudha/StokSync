@@ -76,6 +76,27 @@ void main() {
       );
     });
 
+    test(
+      'labels a durable authentication blocker without hiding local work',
+      () {
+        const summary = SyncSummary(
+          cursor: 8,
+          bootstrapped: true,
+          status: 'blocked',
+          lastSyncedAt: null,
+          lastError: 'SyncAuthenticationException(reason: refresh_rejected)',
+          pendingOperationCount: 2,
+          unresolvedConflictCount: 1,
+        );
+
+        expect(localSyncStatusLabel(summary), 'Sync blocked');
+        expect(
+          localSyncLastKnownStatus(summary),
+          'Sync blocked: SyncAuthenticationException(reason: refresh_rejected)',
+        );
+      },
+    );
+
     testWidgets('shows empty local counts and offline-first copy', (
       tester,
     ) async {

@@ -113,6 +113,7 @@ final class LocalInventoryQueries {
         sync_state.bootstrapped AS bootstrapped,
         sync_state.last_sync_at AS last_sync_at,
         sync_state.last_error AS last_error,
+        sync_state.status AS status,
         (SELECT COUNT(*) FROM pending_ops) AS pending_operation_count,
         (SELECT COUNT(*) FROM conflicts
           WHERE resolution_status = 'unresolved') AS unresolved_conflict_count
@@ -129,6 +130,7 @@ final class LocalInventoryQueries {
       (row) => SyncSummary(
         cursor: row.read<int>('cursor'),
         bootstrapped: row.read<int>('bootstrapped') != 0,
+        status: row.read<String>('status'),
         lastSyncedAt: row.readNullable<DateTime>('last_sync_at')?.toUtc(),
         lastError: row.readNullable<String>('last_error'),
         pendingOperationCount: row.read<int>('pending_operation_count'),
@@ -172,6 +174,7 @@ final class SyncSummary {
   const SyncSummary({
     required this.cursor,
     required this.bootstrapped,
+    this.status = 'idle',
     required this.lastSyncedAt,
     required this.lastError,
     required this.pendingOperationCount,
@@ -180,6 +183,7 @@ final class SyncSummary {
 
   final int cursor;
   final bool bootstrapped;
+  final String status;
   final DateTime? lastSyncedAt;
   final String? lastError;
   final int pendingOperationCount;

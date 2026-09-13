@@ -14,7 +14,7 @@ void main() {
     () async {
       final database = StokSyncDatabase(NativeDatabase.memory());
       addTearDown(database.close);
-      final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+      final now = DateTime.utc(2026, 9, 13, 10, 2, 14, 987654);
 
       await database
           .into(database.products)
