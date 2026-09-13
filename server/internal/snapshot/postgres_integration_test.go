@@ -69,8 +69,12 @@ func TestPostgresSnapshotIntegration(t *testing.T) {
 	if foundOtherAccountRow {
 		t.Fatal("snapshot returned a product owned by another account")
 	}
-	if got.Cursor != fixture.highWater {
-		t.Fatalf("snapshot cursor = %d, want consistent high-water cursor %d", got.Cursor, fixture.highWater)
+	// sync_seq_counter is a single global row, so a concurrently running test
+	// package can advance it past this fixture's high-water mark. The invariant
+	// is that the snapshot cursor covers every fixture change, not that this
+	// test has exclusive use of the database.
+	if got.Cursor < fixture.highWater {
+		t.Fatalf("snapshot cursor = %d, want at least fixture high-water cursor %d", got.Cursor, fixture.highWater)
 	}
 
 	writerProductID := uuid.New()
@@ -132,8 +136,14 @@ func TestPostgresSnapshotIntegration(t *testing.T) {
 	if consistent.result.productCount != 2 || consistent.result.movementCount != 1 {
 		t.Fatalf("repeatable-read rows = (products %d, movements %d), want pre-writer (2, 1)", consistent.result.productCount, consistent.result.movementCount)
 	}
-	if consistent.result.cursorBefore != fixture.highWater || consistent.result.cursorAfter != fixture.highWater {
-		t.Fatalf("repeatable-read cursors = (%d, %d), want fixture high-water %d", consistent.result.cursorBefore, consistent.result.cursorAfter, fixture.highWater)
+	// The property under test is repeatable-read stability: the cursor observed
+	// inside the snapshot transaction must not move even though the concurrent
+	// writer committed a change between the two reads.
+	if consistent.result.cursorBefore != consistent.result.cursorAfter {
+		t.Fatalf("repeatable-read cursors = (%d, %d), want a stable cursor across the concurrent commit", consistent.result.cursorBefore, consistent.result.cursorAfter)
+	}
+	if consistent.result.cursorBefore < fixture.highWater {
+		t.Fatalf("repeatable-read cursor = %d, want at least fixture high-water %d", consistent.result.cursorBefore, fixture.highWater)
 	}
 	var writerRows int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM products WHERE user_id = $1 AND id = $2`, asPGUUID(fixture.userID), asPGUUID(writerProductID)).Scan(&writerRows); err != nil {

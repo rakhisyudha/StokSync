@@ -360,6 +360,16 @@ final class SyncOperation {
     if (baseVersion != null && baseVersion! < 0) {
       throw _invalid('base_version', 'must not be negative');
     }
+    if (kind == SyncOperationKind.addMovement && baseVersion != null) {
+      throw _invalid('base_version', 'is only valid for product mutations');
+    }
+    if (kind == SyncOperationKind.deleteProduct &&
+        (baseVersion == null || baseVersion! <= 0)) {
+      throw _invalid(
+        'base_version',
+        'is required and must be positive for product deletion',
+      );
+    }
     _validatePayloadType();
     return <String, Object?>{
       'op_id': opId,

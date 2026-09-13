@@ -130,6 +130,81 @@ func TestServiceAppliesSupportedOperationsAndPersistsExactResults(t *testing.T) 
 	}
 }
 
+func TestServiceReturnsCurrentStateForStaleProductUpsert(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	productID := uuid.New()
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(1),
+		Payload: mustJSON(t, UpsertProductPayload{ID: productID, Name: "Stale local edit", Unit: "pcs"}),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 1, nil),
+		syncErrorRow(pgx.ErrNoRows),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 2, nil),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 2, nil),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	assertVersionConflictState(t, result, operation.OpID, productID, 2)
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
+func TestServiceReturnsCurrentStateForStaleProductDelete(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	productID := uuid.New()
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(1),
+		Payload: mustJSON(t, DeleteProductPayload{ID: productID}),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncErrorRow(pgx.ErrNoRows),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 2, nil),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 2, nil),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	assertVersionConflictState(t, result, operation.OpID, productID, 2)
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
+func assertVersionConflictState(t *testing.T, result OperationResult, operationID, productID uuid.UUID, wantVersion int64) {
+	t.Helper()
+	if result.OpID != operationID || result.Status != ResultStatusRejected || result.Reason != ReasonVersionConflict {
+		t.Fatalf("result = %#v, want version conflict for %s", result, operationID)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(result.ServerState, &state); err != nil {
+		t.Fatalf("decode server state: %v", err)
+	}
+	if got, ok := state["version"].(float64); !ok || int64(got) != wantVersion {
+		t.Fatalf("server state version = %#v, want %d", state["version"], wantVersion)
+	}
+	if state["id"] != productID.String() {
+		t.Fatalf("server state id = %#v, want %s", state["id"], productID)
+	}
+}
 func TestServicePersistsStableOwnershipRejectionWithoutChangeLog(t *testing.T) {
 	t.Parallel()
 

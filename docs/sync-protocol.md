@@ -52,8 +52,14 @@ empty array when there is no push work):
 ```
 
 The supported operation envelopes are `add_movement`, `upsert_product`, and
-`delete_product`. Each requires a UUID `op_id` and a JSON-object payload;
-`base_version` is optional for versioned product mutations. Payload fields are
+`delete_product`. Each requires a UUID `op_id` and a JSON-object payload.
+`base_version` is a canonical optimistic-concurrency field for product
+mutations: an upsert that edits an existing product and every delete must carry
+the positive version observed by the client; a create upsert may omit it (or
+carry zero while the product is not yet present on the server). Movement
+operations must omit `base_version`. The server checks the version in the same
+PostgreSQL mutation statement that writes the product, so concurrent writers
+cannot both apply an edit based on the same version. Payload fields are
 strictly decoded. Movement payloads require `id`, `product_id`, non-zero
 `delta`, a supported `kind`, and `occurred_at`; product upserts require `id`
 and `name`; deletes require `id`. Optional movement audit fields include
@@ -79,6 +85,17 @@ A successful response includes `schema_version`, independent per-operation
   "server_time": "2026-09-13T10:02:15Z"
 }
 ```
+
+A rejected product edit with `reason: "version_conflict"` is a successful
+per-operation outcome, not a failed sync exchange. Its `server_state` contains
+the latest account-owned canonical product representation, including `id`,
+all product fields, `version`, timestamps, update device, and deletion state.
+The state is read again after the conditional mutation misses, so a concurrent
+writer cannot cause the response to report the product snapshot observed before
+that writer committed. The result is persisted in `sync_ops` and is replayed
+unchanged for a duplicate `(device_id, op_id)` delivery. No product write or
+change-log entry is created for the rejected operation; the client retains the
+local operation and records the base/local/server values for later resolution.
 
 The strict decoder rejects unknown fields, missing required fields, malformed
 UUIDs/timestamps, trailing JSON values, and non-object operation payloads. The

@@ -348,6 +348,9 @@ func (o Operation) ValidateWithLimits(configured Limits) error {
 	}
 	switch payload := decoded.(type) {
 	case AddMovementPayload:
+		if o.BaseVersion != nil {
+			return invalid(ErrInvalidOperation, "base_version", "is only valid for product mutations")
+		}
 		if payload.ID == uuid.Nil {
 			return invalid(ErrInvalidOperation, "payload.id", "is required")
 		}
@@ -395,6 +398,9 @@ func (o Operation) ValidateWithLimits(configured Limits) error {
 			return invalid(ErrInvalidOperation, "payload.min_stock", "must not be negative")
 		}
 	case DeleteProductPayload:
+		if o.BaseVersion == nil || *o.BaseVersion <= 0 {
+			return invalid(ErrInvalidOperation, "base_version", "is required and must be positive for product deletion")
+		}
 		if payload.ID == uuid.Nil {
 			return invalid(ErrInvalidOperation, "payload.id", "is required")
 		}

@@ -261,8 +261,10 @@ func (s *Service) applyProductUpsert(ctx context.Context, queries *db.Queries, i
 		if !ok {
 			return OperationResult{}, nil, err
 		}
-		if errors.Is(err, products.ErrVersionConflict) {
-			result.ServerState = productState(current)
+		if errors.Is(err, products.ErrVersionConflict) || errors.Is(err, products.ErrProductDeleted) {
+			if err := attachCanonicalProductState(ctx, queries, identity.UserID, payload.ID, &result); err != nil {
+				return OperationResult{}, nil, err
+			}
 		}
 		return result, nil, nil
 	}
@@ -297,6 +299,11 @@ func (s *Service) applyProductDelete(ctx context.Context, queries *db.Queries, i
 	})
 	if err != nil {
 		if result, ok := rejectedForDomainError(operation.OpID, err); ok {
+			if errors.Is(err, products.ErrVersionConflict) || errors.Is(err, products.ErrProductDeleted) {
+				if err := attachCanonicalProductState(ctx, queries, identity.UserID, payload.ID, &result); err != nil {
+					return OperationResult{}, nil, err
+				}
+			}
 			return result, nil, nil
 		}
 		return OperationResult{}, nil, err
@@ -431,6 +438,24 @@ func productState(product db.Product) json.RawMessage {
 		return nil
 	}
 	return payload
+}
+
+func attachCanonicalProductState(ctx context.Context, queries *db.Queries, userID, productID uuid.UUID, result *OperationResult) error {
+	if result == nil {
+		return errors.New("operation result is required")
+	}
+	product, err := queries.GetProductByID(ctx, productID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if product.UserID != userID {
+		return nil
+	}
+	result.ServerState = productState(product)
+	return nil
 }
 
 type movementChangePayload struct {

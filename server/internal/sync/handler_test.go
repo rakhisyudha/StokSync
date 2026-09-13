@@ -288,9 +288,10 @@ func TestHandlerKeepsOperationFailuresIndependentAndMapsRegistrationErrors(t *te
 func validSyncOperation(t *testing.T) Operation {
 	t.Helper()
 	return Operation{
-		OpID:    uuid.New(),
-		Op:      OperationDeleteProduct,
-		Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()}),
+		OpID:        uuid.New(),
+		Op:          OperationDeleteProduct,
+		BaseVersion: int64Pointer(1),
+		Payload:     mustJSON(t, DeleteProductPayload{ID: uuid.New()}),
 	}
 }
 

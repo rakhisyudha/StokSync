@@ -161,7 +161,7 @@ func TestOperationValidationCoversKnownPayloadShapes(t *testing.T) {
 		{
 			name: "product delete",
 			operation: Operation{
-				OpID: uuid.New(), Op: OperationDeleteProduct,
+				OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(7),
 				Payload: mustJSON(t, DeleteProductPayload{ID: productID}),
 			},
 		},
@@ -180,6 +180,8 @@ func TestOperationValidationCoversKnownPayloadShapes(t *testing.T) {
 		{OpID: uuid.New(), Op: OperationDeleteProduct, Payload: json.RawMessage(`{"id":"` + productID.String() + `","unknown":true}`)},
 		{OpID: uuid.New(), Op: OperationAddMovement, Payload: json.RawMessage(`{"id":"` + movementID.String() + `","product_id":"` + productID.String() + `","delta":0,"kind":"issue","occurred_at":"2026-01-02T03:04:05Z"}`)},
 		{OpID: uuid.New(), Op: OperationAddMovement, Payload: json.RawMessage(`{"id":"` + movementID.String() + `","product_id":"` + productID.String() + `","delta":1,"kind":"stocktake","occurred_at":"2026-01-02T03:04:05Z"}`)},
+		{OpID: uuid.New(), Op: OperationDeleteProduct, Payload: json.RawMessage(`{"id":"` + productID.String() + `"}`)},
+		{OpID: uuid.New(), Op: OperationAddMovement, BaseVersion: int64Pointer(1), Payload: json.RawMessage(`{"id":"` + movementID.String() + `","product_id":"` + productID.String() + `","delta":1,"kind":"issue","occurred_at":"2026-01-02T03:04:05Z"}`)},
 		{OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(-1), Payload: json.RawMessage(`{"id":"` + productID.String() + `","name":"Product"}`)},
 	}
 	for index, operation := range invalidCases {
@@ -199,8 +201,8 @@ func TestDecodeRequestEnforcesBodyOperationPayloadAndChangeLimits(t *testing.T) 
 
 	request := validRequest(t)
 	request.Ops = []Operation{
-		{OpID: uuid.New(), Op: OperationDeleteProduct, Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()})},
-		{OpID: uuid.New(), Op: OperationDeleteProduct, Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()})},
+		{OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(1), Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()})},
+		{OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(1), Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()})},
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -221,7 +223,7 @@ func TestDecodeRequestEnforcesBodyOperationPayloadAndChangeLimits(t *testing.T) 
 	}
 
 	request.Ops = []Operation{{
-		OpID: uuid.New(), Op: OperationDeleteProduct,
+		OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(1),
 		Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()}),
 	}}
 	body, err = json.Marshal(request)

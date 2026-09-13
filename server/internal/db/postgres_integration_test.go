@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +53,7 @@ func TestPostgresPersistenceIntegration(t *testing.T) {
 	err = pool.WithTx(ctx, func(queries *Queries) error {
 		_, err := queries.DB().Exec(ctx, `
 INSERT INTO users (id, email, password_hash)
-VALUES ($1, $2, $3)`, uuidArg(rollbackUserID), "rollback@example.test", "test-hash")
+VALUES ($1, $2, $3)`, uuidArg(rollbackUserID), "rollback-"+rollbackUserID.String()+"@example.test", "test-hash")
 		if err != nil {
 			return err
 		}
@@ -108,7 +110,7 @@ VALUES ($1, $2, $3)`, uuidArg(rollbackUserID), "rollback@example.test", "test-ha
 	err = pool.WithTx(ctx, func(queries *Queries) error {
 		if _, err := queries.DB().Exec(ctx, `
 INSERT INTO users (id, email, password_hash)
-VALUES ($1, $2, $3)`, uuidArg(userID), "integration@example.test", "test-hash"); err != nil {
+VALUES ($1, $2, $3)`, uuidArg(userID), "integration-"+userID.String()+"@example.test", "test-hash"); err != nil {
 			return err
 		}
 		if _, err := queries.DB().Exec(ctx, `
@@ -222,7 +224,22 @@ VALUES ($1, $2, $3, $4)`, uuidArg(deviceID), uuidArg(userID), "integration-devic
 	if err != nil {
 		t.Fatalf("GetSyncOperation() after commit: %v", err)
 	}
-	if string(operation.Response) != string(response) {
-		t.Errorf("stored response = %s, want %s", operation.Response, response)
+	// sync_ops.response is JSONB, so PostgreSQL normalizes key order and
+	// whitespace on storage. The replay contract is that the recorded outcome
+	// decodes to the original outcome, not that its bytes survive verbatim.
+	assertEquivalentJSON(t, operation.Response, response)
+}
+
+func assertEquivalentJSON(t *testing.T, got, want []byte) {
+	t.Helper()
+	var gotValue, wantValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode stored JSON %s: %v", got, err)
+	}
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode expected JSON %s: %v", want, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Errorf("stored JSON = %s, want equivalent to %s", got, want)
 	}
 }

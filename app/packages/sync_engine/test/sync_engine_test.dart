@@ -78,6 +78,32 @@ void main() {
       },
     );
 
+    test('requires canonical versions only for product mutations', () {
+      final movement = SyncOperation(
+        opId: _operationId,
+        kind: SyncOperationKind.addMovement,
+        baseVersion: 1,
+        payload: AddMovementPayload(
+          id: _movementId,
+          productId: _productId,
+          delta: 1,
+          kind: 'receive',
+          occurredAt: DateTime.utc(2026, 9, 13, 10),
+        ),
+      );
+      expect(() => movement.toJson(), throwsA(isA<SyncProtocolException>()));
+
+      final deleteWithoutBase = <String, Object?>{
+        'op_id': '0192f3a3-0000-7000-8000-000000000001',
+        'op': 'delete_product',
+        'payload': <String, Object?>{'id': _productId},
+      };
+      expect(
+        () => SyncOperation.fromJson(deleteWithoutBase),
+        throwsA(isA<SyncProtocolException>()),
+      );
+    });
+
     test('decodes complete responses and preserves rejection state safely', () {
       final response = SyncResponse(
         results: [
