@@ -127,6 +127,31 @@ This offset is a clock hint for later local timestamp creation; it does not
 change cursor advancement, queue selection, retry scheduling, or response
 reconciliation.
 
+### Client queue scheduling and interruption recovery
+
+The client serializes complete push cycles with one async mutex. Each cycle
+recovers rows left in `inflight`, then selects due rows where `status` is
+`queued` or `retrying`, ordered by durable `local_seq` and limited to the
+bounded request size. Selection changes the claimed rows to `inflight` in the
+same SQLite transaction, so a second trigger cannot claim the same rows in the
+same process.
+
+`inflight` is recoverable work, not a completion marker. If the process stops
+before response reconciliation, the next cycle returns those rows to `queued`
+without deleting their payloads or resetting their attempt count. A remotely
+committed operation may consequently be delivered again, which is safe because
+its `(device_id, op_id)` idempotency record returns the original outcome.
+
+Network/socket failures, timeouts, HTTP 429 responses, HTTP 5xx responses, and
+clock-offset persistence failures increment `attempts` and set `status` to
+`retrying` with a durable `next_attempt_at`. The delay is capped exponential
+backoff with bounded jitter (one second through five minutes by default).
+Authentication and unsupported-schema blockers release rows back to `queued`
+for the outer auth/update flow. Malformed requests and non-retryable client or
+protocol failures remain retained as `blocked` rows with a safe error summary.
+Removing applied rows and creating canonical conflicts are response
+reconciliation responsibilities, not scheduler responsibilities.
+
 ### Authentication requests and sessions
 
 `register` and `login` accept the same JSON shape:

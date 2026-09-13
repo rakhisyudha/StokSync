@@ -4,4 +4,6 @@ library;
 export 'src/clock.dart';
 export 'src/errors.dart';
 export 'src/protocol.dart';
+export 'src/retry.dart';
+export 'src/scheduling.dart';
 export 'src/transport.dart';

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:sync_engine/sync_engine.dart';
 
 import '../../core/identifiers/uuid_v7_generator.dart';
 import '../../core/identity/device_identity.dart';
@@ -125,7 +126,7 @@ final class LocalMovementNotFoundException implements Exception {
 /// This DAO is deliberately only used by local mutation repositories. Its
 /// [enqueue] call must execute inside a database transaction alongside the
 /// domain and projection writes it represents.
-final class PendingOperationDao {
+final class PendingOperationDao implements SyncPendingOperationStore {
   PendingOperationDao(this._database);
 
   final StokSyncDatabase _database;
@@ -163,6 +164,135 @@ final class PendingOperationDao {
       _database.pendingOperations,
     )..addColumns([maximumSequence])).getSingle();
     return (row.read(maximumSequence) ?? 0) + 1;
+  }
+
+  /// Returns rows abandoned by an interrupted exchange to the recoverable
+  /// queue. A row that was already removed by reconciliation is unaffected.
+  @override
+  Future<void> recoverInterruptedOperations() async {
+    await (_database.update(_database.pendingOperations)
+          ..where((row) => row.status.equals('inflight')))
+        .write(const PendingOperationsCompanion(status: Value('queued')));
+  }
+
+  /// Claims due rows in local FIFO order and marks them inflight in the same
+  /// SQLite transaction as selection.
+  @override
+  Future<List<PendingSyncOperation>> claimDueOperations({
+    required DateTime now,
+    required int limit,
+  }) async {
+    if (limit <= 0) {
+      throw ArgumentError.value(limit, 'limit', 'must be positive');
+    }
+    final nowUtc = now.toUtc();
+    return _database.transaction(() async {
+      final rows =
+          await (_database.select(_database.pendingOperations)
+                ..where(
+                  (row) =>
+                      row.status.isIn(const ['queued', 'retrying']) &
+                      row.nextAttemptAt.isSmallerOrEqualValue(nowUtc),
+                )
+                ..orderBy([(row) => OrderingTerm.asc(row.localSeq)])
+                ..limit(limit))
+              .get();
+      if (rows.isEmpty) {
+        return const <PendingSyncOperation>[];
+      }
+
+      final operationIds = rows.map((row) => row.opId).toList(growable: false);
+      final updatedRows =
+          await (_database.update(_database.pendingOperations)..where(
+                (row) =>
+                    row.opId.isIn(operationIds) &
+                    row.status.isIn(const ['queued', 'retrying']) &
+                    row.nextAttemptAt.isSmallerOrEqualValue(nowUtc),
+              ))
+              .write(
+                const PendingOperationsCompanion(status: Value('inflight')),
+              );
+      if (updatedRows != rows.length) {
+        throw StateError('pending operation claim changed unexpectedly');
+      }
+
+      return rows
+          .map(
+            (row) => PendingSyncOperation(
+              opId: row.opId,
+              localSeq: row.localSeq,
+              entity: row.entity,
+              entityId: row.entityId,
+              operation: row.operation,
+              payload: row.payload,
+              baseVersion: row.baseVersion,
+              attempts: row.attempts,
+              nextAttemptAt: row.nextAttemptAt,
+              lastError: row.lastError,
+              status: PendingSyncOperationStatus.inflight,
+            ),
+          )
+          .toList(growable: false);
+    });
+  }
+
+  /// Increments the durable attempt counter and schedules the next retry.
+  /// Only an inflight row can be transitioned by this method.
+  @override
+  Future<void> scheduleRetry(
+    String operationId, {
+    required DateTime scheduledAt,
+    required Duration delay,
+    required String error,
+  }) async {
+    if (delay < Duration.zero) {
+      throw ArgumentError.value(delay, 'delay', 'must not be negative');
+    }
+    await _database.transaction(() async {
+      final row = await (_database.select(
+        _database.pendingOperations,
+      )..where((entry) => entry.opId.equals(operationId))).getSingleOrNull();
+      if (row == null || row.status != 'inflight') {
+        return;
+      }
+      await (_database.update(
+        _database.pendingOperations,
+      )..where((entry) => entry.opId.equals(operationId))).write(
+        PendingOperationsCompanion(
+          attempts: Value(row.attempts + 1),
+          nextAttemptAt: Value(scheduledAt.toUtc().add(delay)),
+          lastError: Value(error),
+          status: const Value('retrying'),
+        ),
+      );
+    });
+  }
+
+  /// Releases claimed rows without changing retry metadata. This is used for
+  /// authentication/schema blockers and failed local response application.
+  @override
+  Future<void> releaseInFlight(Iterable<String> operationIds) async {
+    final ids = operationIds.toList(growable: false);
+    if (ids.isEmpty) {
+      return;
+    }
+    await (_database.update(_database.pendingOperations)
+          ..where((row) => row.opId.isIn(ids) & row.status.equals('inflight')))
+        .write(const PendingOperationsCompanion(status: Value('queued')));
+  }
+
+  /// Parks a non-retryable operation while retaining its payload and error.
+  @override
+  Future<void> markBlocked(String operationId, {required String error}) async {
+    await (_database.update(_database.pendingOperations)..where(
+          (row) => row.opId.equals(operationId) & row.status.equals('inflight'),
+        ))
+        .write(
+          PendingOperationsCompanion(
+            lastError: Value(error),
+            status: const Value('blocked'),
+          ),
+        );
   }
 }
 
