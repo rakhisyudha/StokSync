@@ -494,6 +494,16 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394019
+      },
+      {
+        "executionId": "3ca6f1d7-fed2-4a6e-a243-ed91e14979cb",
+        "chatSessionId": "sess_b58ed2e8-54f4-475c-9591-731f5b04a3c7",
+        "timestamp": 1789315216159
+      },
+      {
+        "executionId": "3ca6f1d7-fed2-4a6e-a243-ed91e14979cb",
+        "chatSessionId": "sess_b58ed2e8-54f4-475c-9591-731f5b04a3c7",
+        "timestamp": 1789315674119
       }
     ],
     "3.8 Add unit/integration tests for duplicate delivery, lost response, partial-batch success, server error retries, and retry persistence across restart.": [
@@ -501,6 +511,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394063
+      },
+      {
+        "executionId": "1615405d-d6a4-4ce6-9e21-188f277cd925",
+        "chatSessionId": "sess_b58ed2e8-54f4-475c-9591-731f5b04a3c7",
+        "timestamp": 1789315746358
       }
     ],
     "4.1 Implement server change-feed reads ordered by `seq > cursor`, bounded by `max_changes`, returning `next_cursor` and `has_more`.": [
