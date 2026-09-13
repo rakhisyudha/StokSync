@@ -27,7 +27,7 @@
 - [x] 1.2 Implement local UUIDv7 generation and durable device identity.
 - [x] 1.3 Implement repositories that atomically write domain changes, local balance projections, and pending operations in one SQLite transaction.
 - [x] 1.4 Implement a rebuildable local balance projection from the ledger and test it against incremental updates.
-- [ ] 1.5 Build Riverpod providers over Drift `watch()` queries for active products, product details, movement history, low-stock products, and sync summary.
+- [x] 1.5 Build Riverpod providers over Drift `watch()` queries for active products, product details, movement history, low-stock products, and sync summary.
 - [ ] 1.6 Build product browse/search/detail/create/edit/soft-delete flows backed only by local data.
 - [ ] 1.7 Integrate `mobile_scanner`: permissions, allowed formats, duplicate-read debounce, matching-product navigation, and unknown-barcode product creation.
 - [ ] 1.8 Build receive, issue, adjustment, reversal, and stocktake entry flows with notes and validation.
