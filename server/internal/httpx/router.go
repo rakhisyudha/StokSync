@@ -17,7 +17,7 @@ import (
 type ReadinessCheck func(context.Context) error
 
 // NewRouter constructs the versioned API router and its cross-cutting middleware.
-func NewRouter(logger *slog.Logger, readiness ReadinessCheck) http.Handler {
+func NewRouter(logger *slog.Logger, readiness ReadinessCheck, authRoutes ...http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -29,6 +29,10 @@ func NewRouter(logger *slog.Logger, readiness ReadinessCheck) http.Handler {
 	router.Use(middleware.RequestID)
 	router.Use(requestLogger(logger))
 	router.Use(recoverer(logger))
+
+	if len(authRoutes) > 0 && authRoutes[0] != nil {
+		router.Mount("/v1/auth", authRoutes[0])
+	}
 
 	router.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, statusResponse{Status: "ok"})

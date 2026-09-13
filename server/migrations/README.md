@@ -6,7 +6,9 @@ container configured in the repository root `docker-compose.yml`. Migration
 balance-projection, change-feed, idempotency, and sync-cursor tables. Migration
 `000002` adds ownership-aware foreign keys, domain checks, active-barcode
 uniqueness, the composite idempotency primary key, and indexes for the
-server/synchronization access paths.
+server/synchronization access paths. Migration `000003` adds case-insensitive
+account-email uniqueness, non-empty credential/digest checks, and unique
+refresh-token digests required for safe rotation.
 
 ## Reproducible local smoke check
 
@@ -28,6 +30,16 @@ docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB
 The expected output is a table count of `9`, followed by `1|0`. The migration
 runner records the applied version in `schema_migrations`; rerunning the `up`
 command is safe because the runner tracks applied versions.
+
+Authentication-specific constraints can be checked with:
+
+```powershell
+Get-Content server/migrations/validate_auth.sql |
+  docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+A successful run prints `000003 authentication validation passed` and leaves
+the database unchanged.
 
 ## Constraint validation
 

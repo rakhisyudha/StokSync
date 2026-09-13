@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/stoksync/stoksync/server/internal/auth"
 	"github.com/stoksync/stoksync/server/internal/db"
 	"github.com/stoksync/stoksync/server/internal/httpx"
 	"github.com/stoksync/stoksync/server/internal/platform/config"
@@ -42,7 +43,20 @@ func main() {
 	}
 	defer pool.Close()
 
-	handler := httpx.NewRouter(logger, pool.Ping)
+	authService, err := auth.NewService(pool, auth.Config{
+		AccessTokenSecret: cfg.Auth.AccessTokenSecret,
+		AccessTokenTTL:    cfg.Auth.AccessTokenTTL,
+		RefreshTokenTTL:   cfg.Auth.RefreshTokenTTL,
+		TokenIssuer:       cfg.Auth.TokenIssuer,
+		TokenAudience:     cfg.Auth.TokenAudience,
+		PasswordHashCost:  cfg.Auth.PasswordHashCost,
+	})
+	if err != nil {
+		logger.Error("invalid authentication configuration", "error", err)
+		os.Exit(1)
+	}
+	authHandler := auth.NewHandler(authService, authService.RequireAuth)
+	handler := httpx.NewRouter(logger, pool.Ping, authHandler.Routes())
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

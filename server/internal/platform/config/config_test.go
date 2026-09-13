@@ -162,3 +162,30 @@ func mapLookup(values map[string]string) func(string) (string, bool) {
 		return value, ok
 	}
 }
+
+func TestLoadFromLookupUsesAuthenticationDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := LoadFromLookup(func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatalf("LoadFromLookup() error = %v", err)
+	}
+	if cfg.Auth.AccessTokenTTL != 15*time.Minute || cfg.Auth.RefreshTokenTTL != 90*24*time.Hour {
+		t.Errorf("auth lifetimes = (%s, %s), want (15m, 90d)", cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL)
+	}
+	if cfg.Auth.TokenIssuer != "stoksync-api" || cfg.Auth.TokenAudience != "stoksync-client" || cfg.Auth.PasswordHashCost != 12 {
+		t.Errorf("auth defaults = %#v, want documented defaults", cfg.Auth)
+	}
+	if cfg.Auth.AccessTokenSecret != "" {
+		t.Error("auth secret should remain unset when not configured")
+	}
+}
+
+func TestLoadFromLookupRejectsInvalidAuthenticationCost(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadFromLookup(mapLookup(map[string]string{"STOKSYNC_AUTH_BCRYPT_COST": "3"}))
+	if err == nil || !strings.Contains(err.Error(), "STOKSYNC_AUTH_BCRYPT_COST") {
+		t.Fatalf("invalid auth cost error = %v, want auth-cost context", err)
+	}
+}

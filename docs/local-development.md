@@ -11,7 +11,7 @@ Docker Compose provides PostgreSQL for local development only; it does not run t
    Copy-Item server/.env.example server/.env
    ```
 
-2. Replace `replace-with-a-local-dev-password` in both files with the same unique, URL-safe local password. The templates contain placeholders only and must not receive production credentials.
+2. Replace `replace-with-a-local-dev-password` in both files with the same unique, URL-safe local password. In `server/.env`, also replace the authentication secret placeholder with a random value of at least 32 bytes. The templates contain placeholders only and must not receive production credentials.
 3. Start PostgreSQL and wait for its health check:
 
    ```powershell

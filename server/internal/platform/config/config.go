@@ -19,6 +19,12 @@ const (
 	defaultDatabaseMaxConnLifetime         = time.Hour
 	defaultDatabaseMaxConnIdleTime         = 30 * time.Minute
 	defaultDatabaseHealthCheckPeriod       = time.Minute
+
+	defaultAuthAccessTokenTTL        = 15 * time.Minute
+	defaultAuthRefreshTokenTTL       = 90 * 24 * time.Hour
+	defaultAuthTokenIssuer           = "stoksync-api"
+	defaultAuthTokenAudience         = "stoksync-client"
+	defaultAuthPasswordCost    int32 = 12
 )
 
 // Config contains process-level API settings.
@@ -27,6 +33,20 @@ type Config struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
+	Auth            AuthConfig
+}
+
+// AuthConfig contains authentication lifetimes and the secret used to sign
+// access tokens. The secret is intentionally optional during parsing so unit
+// tests can inspect defaults; auth.NewService rejects an empty or weak secret
+// before the API starts.
+type AuthConfig struct {
+	AccessTokenSecret string
+	AccessTokenTTL    time.Duration
+	RefreshTokenTTL   time.Duration
+	TokenIssuer       string
+	TokenAudience     string
+	PasswordHashCost  int
 }
 
 // DatabaseConfig contains PostgreSQL connection-pool settings. DatabaseURL is
@@ -74,6 +94,21 @@ func LoadFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	accessTokenTTL, err := durationOrDefault(lookup, "STOKSYNC_AUTH_ACCESS_TOKEN_TTL", defaultAuthAccessTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	refreshTokenTTL, err := durationOrDefault(lookup, "STOKSYNC_AUTH_REFRESH_TOKEN_TTL", defaultAuthRefreshTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	passwordHashCost, err := int32OrDefault(lookup, "STOKSYNC_AUTH_BCRYPT_COST", defaultAuthPasswordCost)
+	if err != nil {
+		return Config{}, err
+	}
+	if passwordHashCost < 4 || passwordHashCost > 31 {
+		return Config{}, fmt.Errorf("STOKSYNC_AUTH_BCRYPT_COST must be between 4 and 31")
+	}
 
 	cfg := Config{
 		Environment:     valueOrDefault(lookup, "STOKSYNC_ENV", defaultEnvironment),
@@ -86,6 +121,14 @@ func LoadFromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxConnLifetime:   maxConnLifetime,
 			MaxConnIdleTime:   maxConnIdleTime,
 			HealthCheckPeriod: healthCheckPeriod,
+		},
+		Auth: AuthConfig{
+			AccessTokenSecret: valueOrDefault(lookup, "STOKSYNC_AUTH_ACCESS_TOKEN_SECRET", ""),
+			AccessTokenTTL:    accessTokenTTL,
+			RefreshTokenTTL:   refreshTokenTTL,
+			TokenIssuer:       valueOrDefault(lookup, "STOKSYNC_AUTH_TOKEN_ISSUER", defaultAuthTokenIssuer),
+			TokenAudience:     valueOrDefault(lookup, "STOKSYNC_AUTH_TOKEN_AUDIENCE", defaultAuthTokenAudience),
+			PasswordHashCost:  int(passwordHashCost),
 		},
 	}
 
