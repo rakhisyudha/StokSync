@@ -194,6 +194,54 @@ func TestTryInsertSyncOperationMapsStoredResponse(t *testing.T) {
 	}
 }
 
+func TestAppendChangeLogAllocatesBeforeInserting(t *testing.T) {
+	t.Parallel()
+
+	sequence := int64(42)
+	userID := uuid.MustParse("00000000-0000-4000-8000-000000000041")
+	entityID := uuid.MustParse("00000000-0000-4000-8000-000000000042")
+	deviceID := uuid.MustParse("00000000-0000-4000-8000-000000000043")
+	createdAt := time.Date(2026, time.May, 6, 7, 8, 9, 0, time.UTC)
+	payload := []byte(`{"id":"00000000-0000-4000-8000-000000000042"}`)
+	fake := &orderedQueryDB{rows: []pgx.Row{
+		staticRow{values: []any{sequence}},
+		staticRow{values: []any{
+			sequence,
+			uuidArg(userID),
+			"product",
+			uuidArg(entityID),
+			"upsert",
+			payload,
+			uuidArg(deviceID),
+			createdAt,
+		}},
+	}}
+
+	entry, err := NewQueries(fake).AppendChangeLog(context.Background(), AppendChangeLogParams{
+		UserID:         userID,
+		Entity:         "product",
+		EntityID:       entityID,
+		Op:             "upsert",
+		Payload:        payload,
+		OriginDeviceID: &deviceID,
+	})
+	if err != nil {
+		t.Fatalf("AppendChangeLog() error = %v", err)
+	}
+	if entry.Seq != sequence || entry.UserID != userID || entry.EntityID != entityID {
+		t.Fatalf("entry = %#v, want sequence %d and event IDs", entry, sequence)
+	}
+	if len(fake.queries) != 2 {
+		t.Fatalf("executed queries = %d, want allocator followed by insert", len(fake.queries))
+	}
+	if !strings.Contains(fake.queries[0], "UPDATE sync_seq_counter") {
+		t.Errorf("first query = %q, want sync_seq_counter update", fake.queries[0])
+	}
+	if !strings.Contains(fake.queries[1], "INSERT INTO change_log") {
+		t.Errorf("second query = %q, want change_log insert", fake.queries[1])
+	}
+}
+
 func TestListChangeLogRejectsUnboundedRequest(t *testing.T) {
 	t.Parallel()
 
@@ -205,6 +253,29 @@ func TestListChangeLogRejectsUnboundedRequest(t *testing.T) {
 	if fake.queryCalls != 0 {
 		t.Error("ListChangeLog() executed SQL for an invalid limit")
 	}
+}
+
+type orderedQueryDB struct {
+	rows    []pgx.Row
+	queries []string
+}
+
+func (f *orderedQueryDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (f *orderedQueryDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, nil
+}
+
+func (f *orderedQueryDB) QueryRow(_ context.Context, query string, _ ...any) pgx.Row {
+	f.queries = append(f.queries, query)
+	if len(f.rows) == 0 {
+		return staticRow{err: fmt.Errorf("unexpected query row")}
+	}
+	row := f.rows[0]
+	f.rows = f.rows[1:]
+	return row
 }
 
 type fakeQueryDB struct {

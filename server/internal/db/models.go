@@ -147,8 +147,22 @@ type ChangeLogEntry struct {
 	CreatedAt      time.Time
 }
 
-// InsertChangeLogParams describes a change event written in the same
-// transaction as the domain mutation that produced it.
+// AppendChangeLogParams describes a change event written in the same
+// transaction as the domain mutation that produced it. The sequence is
+// allocated by Queries.AppendChangeLog and is deliberately not supplied by
+// callers.
+type AppendChangeLogParams struct {
+	UserID         uuid.UUID
+	Entity         string
+	EntityID       uuid.UUID
+	Op             string
+	Payload        []byte
+	OriginDeviceID *uuid.UUID
+}
+
+// InsertChangeLogParams is the internal shape used after the transaction-local
+// sequence has been allocated. Callers should use AppendChangeLog instead of
+// supplying a cursor value themselves.
 type InsertChangeLogParams struct {
 	Seq            int64
 	UserID         uuid.UUID

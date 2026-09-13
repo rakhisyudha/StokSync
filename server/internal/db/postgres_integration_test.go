@@ -146,12 +146,7 @@ VALUES ($1, $2, $3, $4)`, uuidArg(deviceID), uuidArg(userID), "integration-devic
 		}); err != nil {
 			return err
 		}
-		seq, err := queries.AllocateChangeSequence(ctx)
-		if err != nil {
-			return err
-		}
-		if _, err := queries.InsertChangeLog(ctx, InsertChangeLogParams{
-			Seq:            seq,
+		if _, err := queries.AppendChangeLog(ctx, AppendChangeLogParams{
 			UserID:         userID,
 			Entity:         "stock_movement",
 			EntityID:       movementID,

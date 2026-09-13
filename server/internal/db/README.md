@@ -44,22 +44,27 @@ err := pool.WithTx(ctx, func(q *db.Queries) error {
     if _, err := q.IncrementProductBalance(ctx, balanceParams); err != nil {
         return err
     }
-    seq, err := q.AllocateChangeSequence(ctx)
-    if err != nil {
-        return err
-    }
-    _, err = q.InsertChangeLog(ctx, changeLogParams(seq, movement))
+    _, err = q.AppendChangeLog(ctx, db.AppendChangeLogParams{
+        UserID:         movement.UserID,
+        Entity:         "stock_movement",
+        EntityID:       movement.ID,
+        Op:             "upsert",
+        Payload:        movementPayload(movement),
+        OriginDeviceID: &movement.DeviceID,
+    })
     return err
 })
 ```
 
 `WithTx` commits only after the callback returns nil and rolls back callback or
-commit failures. `sync_seq_counter` allocation and the corresponding
-`change_log` insert are intentionally exposed as separate calls so a later
-sync service can keep them in the same transaction as its domain mutation.
-`TryInsertSyncOperation` uses `ON CONFLICT (device_id, op_id) DO NOTHING`;
-`inserted == false` means the caller must read the stored outcome and must not
-reapply domain logic.
+commit failures. `AppendChangeLog` updates `sync_seq_counter` and inserts the
+corresponding `change_log` row on the transaction-bound `Queries` executor.
+Therefore the returned sequence is a committed cursor only after `WithTx`
+commits; a rollback restores the counter and removes the event. Do not call
+`AppendChangeLog` on pool-bound queries for a domain mutation, and do not
+supply cursor values through the low-level insert method. `TryInsertSyncOperation`
+uses `ON CONFLICT (device_id, op_id) DO NOTHING`; `inserted == false` means the
+caller must read the stored outcome and must not reapply domain logic.
 
 ## Integration test
 
@@ -72,4 +77,9 @@ go test ./internal/db -run TestPostgresPersistenceIntegration -count=1
 ```
 
 Without that environment variable the integration test is skipped; normal
-`go test ./...` remains fully offline.
+`go test ./...` remains fully offline. The committed-cursor concurrency harness
+can be run with:
+
+```powershell
+go test ./internal/db -run TestPostgresCommittedChangeLogCursors -count=1
+```

@@ -517,7 +517,9 @@ func (q *Queries) CurrentChangeSequence(ctx context.Context) (int64, error) {
 }
 
 // InsertChangeLog records a replication event with an ownership check for the
-// optional originating device.
+// optional originating device. It is the low-level insert used by
+// AppendChangeLog after the transaction-scoped sequence has been allocated;
+// callers should not provide cursor values themselves.
 func (q *Queries) InsertChangeLog(ctx context.Context, params InsertChangeLogParams) (ChangeLogEntry, error) {
 	return scanChangeLogEntry(q.db.QueryRow(ctx, insertChangeLogSQL,
 		params.Seq,
@@ -528,6 +530,28 @@ func (q *Queries) InsertChangeLog(ctx context.Context, params InsertChangeLogPar
 		params.Payload,
 		optionalUUIDArg(params.OriginDeviceID),
 	))
+}
+
+// AppendChangeLog allocates the next change cursor from sync_seq_counter and
+// inserts the corresponding event on this same query executor. The Queries
+// value must be transaction-bound with WithTx when this is paired with a
+// domain mutation. The returned sequence is only a committed cursor after the
+// enclosing transaction commits; rolling back restores both the counter and
+// the change-log row.
+func (q *Queries) AppendChangeLog(ctx context.Context, params AppendChangeLogParams) (ChangeLogEntry, error) {
+	seq, err := q.AllocateChangeSequence(ctx)
+	if err != nil {
+		return ChangeLogEntry{}, err
+	}
+	return q.InsertChangeLog(ctx, InsertChangeLogParams{
+		Seq:            seq,
+		UserID:         params.UserID,
+		Entity:         params.Entity,
+		EntityID:       params.EntityID,
+		Op:             params.Op,
+		Payload:        params.Payload,
+		OriginDeviceID: params.OriginDeviceID,
+	})
 }
 
 // ListChangeLog returns changes strictly after AfterSeq in ascending cursor
