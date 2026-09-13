@@ -28,11 +28,13 @@ var ErrRequestDeviceMismatch = errors.New("sync request device does not match au
 type ServiceAPI interface {
 	ValidateDevice(context.Context, uuid.UUID, uuid.UUID) error
 	ProcessOperation(context.Context, auth.Identity, Operation) (OperationResult, error)
+	ListChanges(context.Context, uuid.UUID, int64, int) (ChangeFeed, error)
 }
 
-// Handler exposes the authenticated push/pull synchronization boundary. Pull
-// change-feed reads are intentionally empty until the later change-feed task;
-// the response shape is already versioned and ready for that implementation.
+// Handler exposes the authenticated push/pull synchronization boundary. Push
+// operations are processed independently first, then the response contains a
+// bounded account-scoped change-feed page beginning strictly after the
+// request cursor.
 type Handler struct {
 	service     ServiceAPI
 	requireAuth auth.Middleware
@@ -120,11 +122,17 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 		results = append(results, result)
 	}
 
+	feed, err := h.service.ListChanges(r.Context(), identity.UserID, request.Cursor, request.MaxChanges)
+	if err != nil {
+		writeSyncError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	clock := h.now
 	if clock == nil {
 		clock = time.Now
 	}
-	response := NewSyncResponse(results, []ChangeEntry{}, request.Cursor, false, clock().UTC())
+	response := NewSyncResponse(results, feed.Changes, feed.NextCursor, feed.HasMore, clock().UTC())
 	var body bytes.Buffer
 	if err := EncodeResponse(&body, response, h.limits); err != nil {
 		writeSyncError(w, http.StatusInternalServerError, err)

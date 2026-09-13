@@ -24,6 +24,12 @@ type fakeSyncService struct {
 	processCalls      []Operation
 	processErrors     map[uuid.UUID]error
 	processResults    map[uuid.UUID]OperationResult
+	changeErr         error
+	changeCalls       int
+	changeUserID      uuid.UUID
+	changeCursor      int64
+	changeMaxChanges  int
+	changeFeed        ChangeFeed
 }
 
 func (f *fakeSyncService) ValidateDevice(_ context.Context, userID, deviceID uuid.UUID) error {
@@ -42,6 +48,21 @@ func (f *fakeSyncService) ProcessOperation(_ context.Context, _ auth.Identity, o
 		return result, nil
 	}
 	return OperationResult{OpID: operation.OpID, Status: ResultStatusRejected, Reason: "test_rejected"}, nil
+}
+
+func (f *fakeSyncService) ListChanges(_ context.Context, userID uuid.UUID, afterSeq int64, maxChanges int) (ChangeFeed, error) {
+	f.changeCalls++
+	f.changeUserID = userID
+	f.changeCursor = afterSeq
+	f.changeMaxChanges = maxChanges
+	if f.changeErr != nil {
+		return ChangeFeed{}, f.changeErr
+	}
+	feed := f.changeFeed
+	if len(feed.Changes) == 0 && feed.NextCursor == 0 && !feed.HasMore {
+		feed.NextCursor = afterSeq
+	}
+	return feed, nil
 }
 
 func TestHandlerRequiresAuthenticationAndMatchesRequestDevice(t *testing.T) {

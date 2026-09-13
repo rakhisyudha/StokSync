@@ -19,7 +19,7 @@ The routes currently implemented are:
 | `POST /v1/auth/refresh` | None; opaque refresh token in the body | Rotates a refresh token and returns a replacement access/refresh-token pair. |
 | `POST /v1/auth/logout` | `Authorization: Bearer <access-token>` | Revokes active refresh sessions for the authenticated device. It returns `204` with no body. |
 | `GET /v1/snapshot` | `Authorization: Bearer <access-token>` | Returns the complete account-scoped bootstrap replica and a consistent cursor. |
-| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.3 applies `add_movement`, `upsert_product`, and `delete_product` atomically with balances, change-log entries, and durable operation outcomes; Task 3.4 replays the stored operation outcome for duplicate `(device_id, op_id)` delivery. Incremental change-feed response pages remain a later task. |
+| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary, processes each received operation in an independent transaction, and returns a bounded account-scoped change-feed page after the request cursor. Task 3.3 applies `add_movement`, `upsert_product`, and `delete_product` atomically with balances, change-log entries, and durable operation outcomes; Task 3.4 replays the stored operation outcome for duplicate `(device_id, op_id)` delivery. |
 
 ### Sync DTO contract (Milestone 3.1)
 
@@ -112,12 +112,7 @@ internal error rather than applying the incoming operation. The authenticated
 user/device ownership checks remain in force for every operation and canonical
 foreign-key/domain service write.
 
-The response still has the complete push/pull shape (`results`, `changes`,
-`next_cursor`, `has_more`, and `server_time`). Task 3.3 returns each applied
-operation's allocated sequence in its result, and Task 3.4 reuses that exact
-stored operation result for duplicate delivery. The `changes` array remains
-empty and the request cursor is preserved until incremental change-feed reads
-are implemented in Task 4.1.
+The change page is read after push operations in one repeatable-read transaction. It selects only rows for the authenticated user with `seq > cursor`, orders them by `seq ASC`, and asks PostgreSQL for `max_changes + 1` rows. The extra look-ahead row is never returned; it only sets `has_more`. `next_cursor` remains the request cursor for an empty page and otherwise equals the final returned sequence, including when another page is available. Account-scoped sequences may contain gaps because other users' changes are intentionally not visible.
 
 The client transport records a rolling server-clock offset after each valid
 response. It computes `server_time - midpoint(request_sent_at,
@@ -261,10 +256,11 @@ The response is versioned and uses UUID strings and RFC 3339 UTC timestamps:
 
 The endpoint bounds database row reads and encoded response size. The default bounds are 10,000 products, 100,000 movements, and 32 MiB; an account exceeding a bound receives `413 snapshot_too_large` rather than a partial response. A request body or query string receives `400 invalid_request`. These limits are intended for v1 catalogs of hundreds to low thousands of products and can be configured at construction time.
 
-The sync response boundary is now implemented with the behavior described above.
-Incremental change-feed reads, canonical operation application, and idempotency
-persistence remain subsequent tasks; this endpoint intentionally does not claim
-those operations were applied.
+The sync response boundary and bounded incremental change-feed read are now
+implemented with the behavior described above. Client-side bootstrap,
+remote-change application, cursor advancement, and pull-loop orchestration
+remain subsequent tasks; this endpoint does not apply changes to a client
+replica.
 
 ## Reproducible HTTP smoke test
 

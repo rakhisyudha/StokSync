@@ -21,10 +21,21 @@ const (
 )
 
 var (
-	ErrInvalidService      = errors.New("sync service is invalid")
-	ErrInvalidIdentity     = errors.New("sync identity is invalid")
-	ErrDeviceNotRegistered = errors.New("sync device is not registered")
+	ErrInvalidService          = errors.New("sync service is invalid")
+	ErrInvalidIdentity         = errors.New("sync identity is invalid")
+	ErrDeviceNotRegistered     = errors.New("sync device is not registered")
+	ErrInvalidChangeFeedCursor = errors.New("change feed cursor must not be negative")
+	ErrInvalidChangeFeedLimit  = errors.New("change feed max_changes is invalid")
 )
+
+// ChangeFeed is one bounded, account-scoped page from the canonical change log.
+// NextCursor is unchanged when the page is empty and otherwise identifies the
+// last returned row, allowing the next request to continue with seq > cursor.
+type ChangeFeed struct {
+	Changes    []ChangeEntry
+	NextCursor int64
+	HasMore    bool
+}
 
 // OperationTransactionHandler is the seam for transaction-bound operation
 // application. The callback receives a transaction-bound query object;
@@ -107,6 +118,69 @@ func (s *Service) ProcessOperation(ctx context.Context, identity auth.Identity, 
 
 	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (OperationResult, error) {
 		return s.operationHandler(ctx, queries, identity, operation)
+	})
+}
+
+// ListChanges reads one consistent page of canonical changes for an account.
+// The query requests one row beyond the response bound so has_more can be
+// determined without a second, race-prone count query. The read is performed
+// in a repeatable-read transaction so the returned page is a stable view even
+// while other accounts or devices append changes.
+func (s *Service) ListChanges(ctx context.Context, userID uuid.UUID, afterSeq int64, maxChanges int) (ChangeFeed, error) {
+	if s == nil || s.beginner == nil {
+		return ChangeFeed{}, ErrInvalidService
+	}
+	if userID == uuid.Nil {
+		return ChangeFeed{}, ErrInvalidIdentity
+	}
+	if afterSeq < 0 {
+		return ChangeFeed{}, ErrInvalidChangeFeedCursor
+	}
+	// ListChangeLog uses int32 for PostgreSQL's LIMIT argument. Reserve one
+	// value for the look-ahead row used to calculate has_more.
+	const maxInt32 = int64(1<<31 - 1)
+	if maxChanges <= 0 || int64(maxChanges) >= maxInt32 {
+		return ChangeFeed{}, ErrInvalidChangeFeedLimit
+	}
+
+	return db.WithSnapshotResult(ctx, s.beginner, func(queries *db.Queries) (ChangeFeed, error) {
+		changes, err := queries.ListChangeLog(ctx, db.ListChangeLogParams{
+			UserID:     userID,
+			AfterSeq:   afterSeq,
+			MaxChanges: int32(maxChanges + 1),
+		})
+		if err != nil {
+			return ChangeFeed{}, err
+		}
+
+		hasMore := len(changes) > maxChanges
+		if hasMore {
+			changes = changes[:maxChanges]
+		}
+
+		feed := ChangeFeed{
+			Changes:    make([]ChangeEntry, 0, len(changes)),
+			NextCursor: afterSeq,
+			HasMore:    hasMore,
+		}
+		for _, change := range changes {
+			var originDeviceID *uuid.UUID
+			if change.OriginDeviceID != nil {
+				origin := *change.OriginDeviceID
+				originDeviceID = &origin
+			}
+			createdAt := change.CreatedAt.UTC()
+			feed.Changes = append(feed.Changes, ChangeEntry{
+				Seq:            change.Seq,
+				Entity:         change.Entity,
+				Op:             change.Op,
+				Data:           append([]byte(nil), change.Payload...),
+				OriginDeviceID: originDeviceID,
+				CreatedAt:      &createdAt,
+			})
+			feed.NextCursor = change.Seq
+		}
+		return feed, nil
 	})
 }
 
