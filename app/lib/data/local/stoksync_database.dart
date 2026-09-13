@@ -151,9 +151,11 @@ class Conflicts extends Table {
 
 /// The local SQLite replica schema.
 ///
-/// Schema version 1 establishes the complete local-first data model. Later
-/// versions must add explicit migration steps in [migration.onUpgrade] rather
-/// than replacing the database, preserving queued operations and audit data.
+/// Schema version 1 establishes the complete local-first data model. Schema
+/// version 2 adds data-preserving SQLite guards for immutable ledger fields.
+/// Later versions must add explicit migration steps in [migration.onUpgrade]
+/// rather than replacing the database, preserving queued operations and audit
+/// data.
 @DriftDatabase(
   tables: [
     Products,
@@ -168,7 +170,7 @@ class StokSyncDatabase extends _$StokSyncDatabase {
   StokSyncDatabase(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -209,6 +211,20 @@ class StokSyncDatabase extends _$StokSyncDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS conflicts_unresolved_index '
       'ON conflicts (resolution_status, created_at)',
+    );
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS stock_movements_prevent_domain_update '
+      'BEFORE UPDATE OF id, product_id, delta, kind, note, occurred_at, '
+      'raw_occurred_at, clock_offset_ms, counted_qty, reverses_id, device_id '
+      'ON stock_movements BEGIN '
+      "SELECT RAISE(ABORT, 'stock movement ledger fields are immutable'); "
+      'END',
+    );
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS stock_movements_prevent_delete '
+      'BEFORE DELETE ON stock_movements BEGIN '
+      "SELECT RAISE(ABORT, 'stock movements cannot be deleted'); "
+      'END',
     );
   }
 
