@@ -15,6 +15,7 @@ import (
 	"github.com/stoksync/stoksync/server/internal/platform/config"
 	"github.com/stoksync/stoksync/server/internal/platform/logging"
 	platformserver "github.com/stoksync/stoksync/server/internal/platform/server"
+	"github.com/stoksync/stoksync/server/internal/snapshot"
 )
 
 func main() {
@@ -56,7 +57,13 @@ func main() {
 		os.Exit(1)
 	}
 	authHandler := auth.NewHandler(authService, authService.RequireAuth)
-	handler := httpx.NewRouter(logger, pool.Ping, authHandler.Routes())
+	snapshotService, err := snapshot.NewService(pool)
+	if err != nil {
+		logger.Error("invalid snapshot configuration", "error", err)
+		os.Exit(1)
+	}
+	snapshotHandler := snapshot.NewHandler(snapshotService, authService.RequireAuth)
+	handler := httpx.NewRouterWithSnapshot(logger, pool.Ping, authHandler.Routes(), snapshotHandler.Routes())
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

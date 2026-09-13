@@ -43,7 +43,7 @@
 - [x] 2.4 Implement password hashing, login, device registration, access-token issuance, refresh-token rotation/revocation, and Chi authentication middleware.
 - [x] 2.5 Implement canonical product and immutable movement transaction services. Maintain server `product_balances` transactionally and provide a projection rebuild verification command/test.
 - [x] 2.6 Implement transaction-scoped change-log sequence allocation through `sync_seq_counter`; never rely on `BIGSERIAL` as the sync cursor.
-- [ ] 2.7 Implement `GET /v1/snapshot` using a consistent snapshot and return products, movements, tombstones, and cursor.
+- [x] 2.7 Implement `GET /v1/snapshot` using a consistent snapshot and return products, movements, tombstones, and cursor.
 - [ ] 2.8 Write API protocol documentation and a reproducible HTTP test collection/script covering login, refresh, snapshot, and health.
 
 **Milestone validation:** A clean local database can login/register a device, create canonical domain data through the service layer, and return a consistent snapshot. A concurrent Postgres integration test demonstrates that committed change-log cursors are ordered and no committed entries are skipped.

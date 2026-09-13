@@ -39,6 +39,25 @@ func TestHealthEndpointReturnsOK(t *testing.T) {
 	}
 }
 
+func TestRouterMountsSnapshotRoute(t *testing.T) {
+	t.Parallel()
+
+	snapshot := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/snapshot" {
+			t.Errorf("mounted snapshot path = %q, want /v1/snapshot", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	router := NewRouterWithSnapshot(testLogger(), nil, nil, snapshot)
+	request := httptest.NewRequest(http.MethodGet, "/v1/snapshot", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("snapshot route status = %d, want 204", recorder.Code)
+	}
+}
+
 func TestReadinessEndpointReportsDependencyFailure(t *testing.T) {
 	t.Parallel()
 

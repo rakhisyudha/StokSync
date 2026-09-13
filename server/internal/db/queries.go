@@ -56,6 +56,15 @@ FROM products
 WHERE user_id = $1 AND ($2::boolean OR deleted_at IS NULL)
 ORDER BY updated_at DESC, id`
 
+	listSnapshotProductsSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE user_id = $1
+ORDER BY id
+LIMIT $2`
+
 	updateProductSQL = `
 UPDATE products
 SET barcode = $3,
@@ -151,6 +160,28 @@ SELECT
 FROM stock_movements
 WHERE user_id = $1 AND product_id = $2
 ORDER BY occurred_at ASC, id`
+
+	listSnapshotMovementsSQL = `
+SELECT
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
+FROM stock_movements
+WHERE user_id = $1
+ORDER BY product_id, occurred_at ASC, id
+LIMIT $2`
+
+	listSnapshotBalancesSQL = `
+SELECT p.id, COALESCE(SUM(sm.delta), 0)::bigint, MAX(sm.occurred_at)
+FROM products AS p
+LEFT JOIN stock_movements AS sm
+    ON sm.user_id = p.user_id AND sm.product_id = p.id
+WHERE p.user_id = $1
+GROUP BY p.id
+ORDER BY p.id
+LIMIT $2`
+
+	currentDatabaseTimeSQL = `
+SELECT CURRENT_TIMESTAMP`
 
 	incrementProductBalanceSQL = `
 INSERT INTO product_balances (product_id, qty, last_movement_at)
@@ -307,6 +338,36 @@ func (q *Queries) ListProducts(ctx context.Context, userID uuid.UUID, includeDel
 		return nil, err
 	}
 	return products, nil
+}
+
+// ListSnapshotProducts returns all account-owned products, including retained
+// tombstones, up to maxRows. truncated is true when the database contained
+// more rows than the requested bound.
+func (q *Queries) ListSnapshotProducts(ctx context.Context, userID uuid.UUID, maxRows int32) (products []Product, truncated bool, err error) {
+	if maxRows <= 0 || maxRows == int32(^uint32(0)>>1) {
+		return nil, false, fmt.Errorf("snapshot product limit must be between 1 and %d", int32(^uint32(0)>>1)-1)
+	}
+	rows, err := q.db.Query(ctx, listSnapshotProductsSQL, uuidArg(userID), maxRows+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	products = make([]Product, 0)
+	for rows.Next() {
+		product, err := scanProduct(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		products = append(products, product)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(products) > int(maxRows) {
+		return products[:maxRows], true, nil
+	}
+	return products, false, nil
 }
 
 // UpdateProduct performs a full version-checked edit. pgx.ErrNoRows means the
@@ -466,6 +527,82 @@ func (q *Queries) ListStockMovements(ctx context.Context, userID, productID uuid
 		return nil, err
 	}
 	return movements, nil
+}
+
+// ListSnapshotMovements returns every retained immutable movement for an
+// account in deterministic product/occurrence order, up to maxRows.
+func (q *Queries) ListSnapshotMovements(ctx context.Context, userID uuid.UUID, maxRows int32) (movements []StockMovement, truncated bool, err error) {
+	if maxRows <= 0 || maxRows == int32(^uint32(0)>>1) {
+		return nil, false, fmt.Errorf("snapshot movement limit must be between 1 and %d", int32(^uint32(0)>>1)-1)
+	}
+	rows, err := q.db.Query(ctx, listSnapshotMovementsSQL, uuidArg(userID), maxRows+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	movements = make([]StockMovement, 0)
+	for rows.Next() {
+		movement, err := scanStockMovement(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		movements = append(movements, movement)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(movements) > int(maxRows) {
+		return movements[:maxRows], true, nil
+	}
+	return movements, false, nil
+}
+
+// ListSnapshotBalances derives one canonical balance per account product from
+// immutable movements. It intentionally does not read product_balances, so a
+// stale or missing projection cannot corrupt bootstrap data.
+func (q *Queries) ListSnapshotBalances(ctx context.Context, userID uuid.UUID, maxRows int32) (balances []LedgerBalance, truncated bool, err error) {
+	if maxRows <= 0 || maxRows == int32(^uint32(0)>>1) {
+		return nil, false, fmt.Errorf("snapshot balance limit must be between 1 and %d", int32(^uint32(0)>>1)-1)
+	}
+	rows, err := q.db.Query(ctx, listSnapshotBalancesSQL, uuidArg(userID), maxRows+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	balances = make([]LedgerBalance, 0)
+	for rows.Next() {
+		var productID pgtype.UUID
+		var qty int64
+		var lastMovementAt pgtype.Timestamptz
+		if err := rows.Scan(&productID, &qty, &lastMovementAt); err != nil {
+			return nil, false, err
+		}
+		balances = append(balances, LedgerBalance{
+			ProductID:      uuidFromPG(productID),
+			Qty:            qty,
+			LastMovementAt: timeFromPG(lastMovementAt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(balances) > int(maxRows) {
+		return balances[:maxRows], true, nil
+	}
+	return balances, false, nil
+}
+
+// CurrentDatabaseTime returns PostgreSQL's transaction timestamp. It is used
+// in snapshot responses so the reported server time belongs to the same
+// consistent read view as the returned rows and cursor.
+func (q *Queries) CurrentDatabaseTime(ctx context.Context) (time.Time, error) {
+	var current time.Time
+	if err := q.db.QueryRow(ctx, currentDatabaseTimeSQL).Scan(&current); err != nil {
+		return time.Time{}, err
+	}
+	return current.UTC(), nil
 }
 
 // IncrementProductBalance updates the rebuildable projection by one movement

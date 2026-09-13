@@ -172,6 +172,27 @@ func TestWithTxResultReturnsCommittedValue(t *testing.T) {
 	}
 }
 
+func TestWithSnapshotResultConfiguresRepeatableReadBeforeCallback(t *testing.T) {
+	t.Parallel()
+
+	transaction := &fakeTx{}
+	value, err := WithSnapshotResult(context.Background(), &fakeBeginner{tx: transaction}, func(*Queries) (string, error) {
+		return "consistent value", nil
+	})
+	if err != nil {
+		t.Fatalf("WithSnapshotResult() error = %v", err)
+	}
+	if value != "consistent value" {
+		t.Errorf("value = %q, want consistent value", value)
+	}
+	if !transaction.committed || transaction.rolledBack {
+		t.Errorf("transaction completion = (committed %t, rolled back %t), want commit only", transaction.committed, transaction.rolledBack)
+	}
+	if len(transaction.execQueries) != 1 || transaction.execQueries[0] != "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" {
+		t.Errorf("transaction setup queries = %#v, want repeatable-read read-only setup", transaction.execQueries)
+	}
+}
+
 type fakeBeginner struct {
 	tx       Tx
 	beginErr error
@@ -189,9 +210,11 @@ type fakeTx struct {
 	rollbackErr error
 	committed   bool
 	rolledBack  bool
+	execQueries []string
 }
 
-func (f *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (f *fakeTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+	f.execQueries = append(f.execQueries, query)
 	return pgconn.CommandTag{}, nil
 }
 

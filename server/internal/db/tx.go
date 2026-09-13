@@ -99,6 +99,48 @@ func WithTxResult[T any](ctx context.Context, beginner TxBeginner, fn func(*Quer
 	return result, nil
 }
 
+// WithSnapshotResult runs a read-only, repeatable-read transaction. PostgreSQL
+// establishes the transaction snapshot before the callback's first query, so
+// every query in the callback observes the same committed database view. The
+// helper intentionally uses TxBeginner rather than a concrete pool so the
+// consistency boundary can be tested without a live database.
+func WithSnapshotResult[T any](ctx context.Context, beginner TxBeginner, fn func(*Queries) (T, error)) (T, error) {
+	var zero T
+	if ctx == nil {
+		return zero, errNilContext
+	}
+	if beginner == nil {
+		return zero, errNilTxBeginner
+	}
+	if fn == nil {
+		return zero, errNilTransactionFunc
+	}
+
+	tx, err := beginner.BeginTx(ctx)
+	if err != nil {
+		return zero, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if _, err := tx.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`); err != nil {
+		return zero, err
+	}
+	result, err := fn(NewQueries(tx))
+	if err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return zero, err
+	}
+	committed = true
+	return result, nil
+}
+
 var (
 	errNilContext         = errorString("database context must not be nil")
 	errNilTxBeginner      = errorString("transaction beginner must not be nil")

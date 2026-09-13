@@ -17,7 +17,24 @@ import (
 type ReadinessCheck func(context.Context) error
 
 // NewRouter constructs the versioned API router and its cross-cutting middleware.
+// It retains the original authentication-only signature for callers that do
+// not yet compose the snapshot endpoint.
 func NewRouter(logger *slog.Logger, readiness ReadinessCheck, authRoutes ...http.Handler) http.Handler {
+	var authRoute http.Handler
+	if len(authRoutes) > 0 {
+		authRoute = authRoutes[0]
+	}
+	return newRouter(logger, readiness, authRoute, nil)
+}
+
+// NewRouterWithSnapshot composes the authenticated snapshot mount alongside
+// the existing auth routes. Keeping the composition here avoids coupling the
+// transport package to the snapshot service implementation.
+func NewRouterWithSnapshot(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute http.Handler) http.Handler {
+	return newRouter(logger, readiness, authRoute, snapshotRoute)
+}
+
+func newRouter(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -30,8 +47,11 @@ func NewRouter(logger *slog.Logger, readiness ReadinessCheck, authRoutes ...http
 	router.Use(requestLogger(logger))
 	router.Use(recoverer(logger))
 
-	if len(authRoutes) > 0 && authRoutes[0] != nil {
-		router.Mount("/v1/auth", authRoutes[0])
+	if authRoute != nil {
+		router.Mount("/v1/auth", authRoute)
+	}
+	if snapshotRoute != nil {
+		router.Mount("/v1/snapshot", snapshotRoute)
 	}
 
 	router.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) {
