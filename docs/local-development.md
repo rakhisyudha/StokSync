@@ -63,3 +63,42 @@ go run ./cmd/verify-projections -user-id <account-uuid> -rebuild
 Both commands must be run from `server/`. They require migrations 000001
 through 000003 and a reachable PostgreSQL database; they do not expose an HTTP
 endpoint or change stock movement history.
+
+## API smoke test
+
+After PostgreSQL is healthy and the migrations are applied, start the API from
+`server/` with the variables in `server/.env` loaded into the current shell.
+The API process reads environment variables; it does not load `.env` files
+itself. For PowerShell, from the repository root:
+
+```powershell
+Get-Content server/.env |
+  Where-Object { $_ -and $_ -notmatch '^\s*#' } |
+  ForEach-Object {
+    $name, $value = $_ -split '=', 2
+    Set-Item -Path "Env:$($name.Trim())" -Value $value.Trim()
+  }
+Push-Location server
+try { go run ./cmd/api } finally { Pop-Location }
+```
+
+In a second terminal, run the reproducible login/refresh/snapshot/health
+check. It creates a disposable account by default, so no credentials need to
+be committed:
+
+```powershell
+.\server\scripts\api-smoke.ps1
+```
+
+To exercise an existing account instead, provide its credentials and skip the
+fixture registration:
+
+```powershell
+.\server\scripts\api-smoke.ps1 `
+  -SkipRegister `
+  -Email "owner@example.test" `
+  -Password "your-local-password"
+```
+
+The complete route contract and response/error shapes are in
+[`sync-protocol.md`](sync-protocol.md).
