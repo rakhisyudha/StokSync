@@ -19,7 +19,7 @@ The routes currently implemented are:
 | `POST /v1/auth/refresh` | None; opaque refresh token in the body | Rotates a refresh token and returns a replacement access/refresh-token pair. |
 | `POST /v1/auth/logout` | `Authorization: Bearer <access-token>` | Revokes active refresh sessions for the authenticated device. It returns `204` with no body. |
 | `GET /v1/snapshot` | `Authorization: Bearer <access-token>` | Returns the complete account-scoped bootstrap replica and a consistent cursor. |
-| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.2 currently returns explicit rejected results for unimplemented domain operations and an empty change page. |
+| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.3 applies `add_movement`, `upsert_product`, and `delete_product` atomically with balances, change-log entries, and durable operation outcomes; incremental change-feed response pages remain a later task. |
 
 ### Sync DTO contract (Milestone 3.1)
 
@@ -91,16 +91,28 @@ The sync handler requires a valid access token, requires the request `device_id`
 to equal the device identity in that token, and verifies that the device is
 registered to the authenticated account. Malformed, oversized, and unsupported
 schema requests are rejected before service work. Each received operation is
-sent through its own transaction boundary; a transaction failure becomes an
-isolated rejected result so later operations can still be handled. Until Task
-3.3 supplies domain services, valid operation envelopes return
-`status: "rejected"` with `reason: "operation_not_implemented"`; no product,
-movement, idempotency, or change-log rows are written by this boundary.
+reserved in `sync_ops` and then processed through its own PostgreSQL
+transaction. A supported successful operation writes its canonical product or
+movement, maintains the product balance projection where applicable, allocates
+and inserts a transaction-scoped change-log entry, and updates the reserved
+`sync_ops` row with the exact JSON operation result before commit. A validation
+or domain conflict is recorded as a stable rejected result in `sync_ops` and
+commits without a change-log entry, so unrelated operations can still be
+processed. Unexpected database failures roll back the domain mutation, change
+log, and reserved outcome together.
 
-The current response still has the complete push/pull shape (`results`,
-`changes`, `next_cursor`, `has_more`, and `server_time`). Task 3.2 returns an
-empty `changes` page and preserves the request cursor.
+A duplicate idempotency key is detected by the atomic `(device_id, op_id)`
+reservation. The current Task 3.3 seam rolls that transaction back and returns a
+stable `duplicate_operation` rejection without reapplying domain logic. Exact
+stored-response replay is intentionally deferred to Task 3.4. The authenticated
+user/device ownership checks remain in force for every operation and canonical
+foreign-key/domain service write.
 
+The response still has the complete push/pull shape (`results`, `changes`,
+`next_cursor`, `has_more`, and `server_time`). Task 3.3 returns each applied
+operation's allocated sequence in its result, but the `changes` array remains
+empty and the request cursor is preserved until incremental change-feed reads
+are implemented in Task 4.1.
 ### Authentication requests and sessions
 
 `register` and `login` accept the same JSON shape:

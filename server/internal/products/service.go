@@ -77,24 +77,42 @@ type DeleteInput = SoftDeleteProductInput
 // in the same transaction. The ledger remains empty until a movement is
 // appended.
 func (s *Service) CreateProduct(ctx context.Context, input CreateProductInput) (db.Product, error) {
-	input, err := normalizeCreateInput(input)
+	normalized, err := normalizeCreateInput(input)
 	if err != nil {
 		return db.Product{}, err
 	}
 	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (db.Product, error) {
-		product, err := queries.InsertProduct(ctx, input)
-		if err != nil {
-			return db.Product{}, mapMutationError(err)
-		}
-		if _, err := queries.UpsertProductBalance(ctx, db.UpsertProductBalanceParams{
-			UserID:    input.UserID,
-			ProductID: input.ID,
-			Qty:       0,
-		}); err != nil {
-			return db.Product{}, mapMutationError(err)
-		}
-		return product, nil
+		return s.createProductInTransaction(ctx, queries, normalized)
 	})
+}
+
+// CreateProductInTransaction applies a product create using the supplied
+// transaction-bound queries. Callers such as synchronization must use this
+// method rather than CreateProduct so domain and sync writes share one tx.
+func (s *Service) CreateProductInTransaction(ctx context.Context, queries *db.Queries, input CreateProductInput) (db.Product, error) {
+	if s == nil || queries == nil {
+		return db.Product{}, ErrInvalidInput
+	}
+	normalized, err := normalizeCreateInput(input)
+	if err != nil {
+		return db.Product{}, err
+	}
+	return s.createProductInTransaction(ctx, queries, normalized)
+}
+
+func (s *Service) createProductInTransaction(ctx context.Context, queries *db.Queries, input CreateProductInput) (db.Product, error) {
+	product, err := queries.InsertProduct(ctx, input)
+	if err != nil {
+		return db.Product{}, mapMutationError(err)
+	}
+	if _, err := queries.UpsertProductBalance(ctx, db.UpsertProductBalanceParams{
+		UserID:    input.UserID,
+		ProductID: input.ID,
+		Qty:       0,
+	}); err != nil {
+		return db.Product{}, mapMutationError(err)
+	}
+	return product, nil
 }
 
 // Create is a concise alias for CreateProduct.
@@ -106,20 +124,37 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (db.Product, er
 // version is classified separately from a missing, deleted, or cross-owner
 // product so the future sync layer can make an explicit conflict decision.
 func (s *Service) UpdateProduct(ctx context.Context, input UpdateProductInput) (db.Product, error) {
-	input, err := normalizeUpdateInput(input)
+	normalized, err := normalizeUpdateInput(input)
 	if err != nil {
 		return db.Product{}, err
 	}
 	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (db.Product, error) {
-		product, err := queries.UpdateProduct(ctx, input)
-		if err == nil {
-			return product, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return db.Product{}, mapMutationError(err)
-		}
-		return db.Product{}, classifyProductMutationMiss(ctx, queries, input.UserID, input.ID)
+		return s.updateProductInTransaction(ctx, queries, normalized)
 	})
+}
+
+// UpdateProductInTransaction applies a version-checked product edit using
+// transaction-bound queries supplied by an outer synchronization transaction.
+func (s *Service) UpdateProductInTransaction(ctx context.Context, queries *db.Queries, input UpdateProductInput) (db.Product, error) {
+	if s == nil || queries == nil {
+		return db.Product{}, ErrInvalidInput
+	}
+	normalized, err := normalizeUpdateInput(input)
+	if err != nil {
+		return db.Product{}, err
+	}
+	return s.updateProductInTransaction(ctx, queries, normalized)
+}
+
+func (s *Service) updateProductInTransaction(ctx context.Context, queries *db.Queries, input UpdateProductInput) (db.Product, error) {
+	product, err := queries.UpdateProduct(ctx, input)
+	if err == nil {
+		return product, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.Product{}, mapMutationError(err)
+	}
+	return db.Product{}, classifyProductMutationMiss(ctx, queries, input.UserID, input.ID)
 }
 
 // Update is a concise alias for UpdateProduct.
@@ -131,20 +166,37 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (db.Product, er
 // of its immutable stock movements. The product balance is intentionally left
 // intact for audit and historical reporting.
 func (s *Service) SoftDeleteProduct(ctx context.Context, input SoftDeleteProductInput) (db.Product, error) {
-	input, err := normalizeDeleteInput(input)
+	normalized, err := normalizeDeleteInput(input)
 	if err != nil {
 		return db.Product{}, err
 	}
 	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (db.Product, error) {
-		product, err := queries.SoftDeleteProduct(ctx, input)
-		if err == nil {
-			return product, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return db.Product{}, mapMutationError(err)
-		}
-		return db.Product{}, classifyProductMutationMiss(ctx, queries, input.UserID, input.ID)
+		return s.softDeleteProductInTransaction(ctx, queries, normalized)
 	})
+}
+
+// SoftDeleteProductInTransaction applies a version-checked tombstone using
+// transaction-bound queries supplied by an outer synchronization transaction.
+func (s *Service) SoftDeleteProductInTransaction(ctx context.Context, queries *db.Queries, input SoftDeleteProductInput) (db.Product, error) {
+	if s == nil || queries == nil {
+		return db.Product{}, ErrInvalidInput
+	}
+	normalized, err := normalizeDeleteInput(input)
+	if err != nil {
+		return db.Product{}, err
+	}
+	return s.softDeleteProductInTransaction(ctx, queries, normalized)
+}
+
+func (s *Service) softDeleteProductInTransaction(ctx context.Context, queries *db.Queries, input SoftDeleteProductInput) (db.Product, error) {
+	product, err := queries.SoftDeleteProduct(ctx, input)
+	if err == nil {
+		return product, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.Product{}, mapMutationError(err)
+	}
+	return db.Product{}, classifyProductMutationMiss(ctx, queries, input.UserID, input.ID)
 }
 
 // DeleteProduct is an explicit alias for the soft-delete operation.

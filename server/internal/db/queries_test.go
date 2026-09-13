@@ -349,3 +349,45 @@ func assertUUIDArg(t *testing.T, value any, want uuid.UUID) {
 		t.Errorf("UUID argument = %#v, want %s", got, want)
 	}
 }
+
+func TestUpdateSyncOperationMapsFinalResponse(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.MustParse("00000000-0000-4000-8000-000000000051")
+	deviceID := uuid.MustParse("00000000-0000-4000-8000-000000000052")
+	opID := uuid.MustParse("00000000-0000-4000-8000-000000000053")
+	receivedAt := time.Date(2026, time.July, 7, 8, 9, 10, 0, time.UTC)
+	completedAt := receivedAt.Add(time.Second)
+	response := []byte(`{"op_id":"00000000-0000-4000-8000-000000000053","status":"applied","seq":43}`)
+	fake := &fakeQueryDB{row: staticRow{values: []any{
+		uuidArg(deviceID),
+		uuidArg(opID),
+		uuidArg(userID),
+		"applied",
+		pgtype.Text{},
+		response,
+		receivedAt,
+		pgtype.Timestamptz{Time: completedAt, Valid: true},
+	}}}
+
+	operation, err := NewQueries(fake).UpdateSyncOperation(context.Background(), UpdateSyncOperationParams{
+		UserID:      userID,
+		DeviceID:    deviceID,
+		OpID:        opID,
+		Status:      "applied",
+		Response:    response,
+		CompletedAt: &completedAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSyncOperation() error = %v", err)
+	}
+	if operation.OpID != opID || operation.Status != "applied" || !reflect.DeepEqual(operation.Response, response) {
+		t.Fatalf("operation = %#v, want finalized response", operation)
+	}
+	if !strings.Contains(fake.lastQuery, "UPDATE sync_ops") || !strings.Contains(fake.lastQuery, "completed_at = $7") {
+		t.Errorf("query = %q, want final sync_ops update", fake.lastQuery)
+	}
+	assertUUIDArg(t, fake.lastArgs[0], userID)
+	assertUUIDArg(t, fake.lastArgs[1], deviceID)
+	assertUUIDArg(t, fake.lastArgs[2], opID)
+}

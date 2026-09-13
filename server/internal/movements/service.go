@@ -139,13 +139,27 @@ type ProjectionVerification struct {
 // projection in the same transaction. Stocktake deltas are computed from the
 // canonical ledger; ordinary movements use the supplied non-zero delta.
 func (s *Service) AppendMovement(ctx context.Context, input AppendInput) (db.StockMovement, error) {
-	input, err := normalizeAppendInput(input)
+	normalized, err := normalizeAppendInput(input)
 	if err != nil {
 		return db.StockMovement{}, err
 	}
 	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (db.StockMovement, error) {
-		return s.appendInTransaction(ctx, queries, input)
+		return s.appendInTransaction(ctx, queries, normalized)
 	})
+}
+
+// AppendMovementInTransaction appends one immutable movement using queries
+// bound to an outer transaction. Synchronization uses this method so the
+// ledger, balance projection, change log, and operation outcome commit as one.
+func (s *Service) AppendMovementInTransaction(ctx context.Context, queries *db.Queries, input AppendInput) (db.StockMovement, error) {
+	if s == nil || queries == nil {
+		return db.StockMovement{}, ErrInvalidInput
+	}
+	normalized, err := normalizeAppendInput(input)
+	if err != nil {
+		return db.StockMovement{}, err
+	}
+	return s.appendInTransaction(ctx, queries, normalized)
 }
 
 // Append is a concise alias for AppendMovement.

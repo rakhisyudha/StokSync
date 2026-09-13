@@ -21,6 +21,10 @@ func TestServiceUsesAnIndependentTransactionForEachOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
+	// Keep this test focused on the independent transaction boundary rather
+	// than the Task 3.3 domain handler; the default handler now executes real
+	// transaction-bound operations.
+	service.operationHandler = rejectOperation
 	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
 	for i := 0; i < 2; i++ {
 		result, err := service.ProcessOperation(context.Background(), identity, Operation{OpID: uuid.New()})

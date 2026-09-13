@@ -426,6 +426,16 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295393861
+      },
+      {
+        "executionId": "105c0699-7450-404d-9827-0a76dcba0eaf",
+        "chatSessionId": "sess_b58ed2e8-54f4-475c-9591-731f5b04a3c7",
+        "timestamp": 1789312462359
+      },
+      {
+        "executionId": "105c0699-7450-404d-9827-0a76dcba0eaf",
+        "chatSessionId": "sess_b58ed2e8-54f4-475c-9591-731f5b04a3c7",
+        "timestamp": 1789313060546
       }
     ],
     "3.4 On duplicate `(device_id, op_id)`, return the originally stored operation response exactly and do not reapply domain logic.": [

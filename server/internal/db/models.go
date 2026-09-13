@@ -186,9 +186,23 @@ type SyncOperation struct {
 	CompletedAt *time.Time
 }
 
-// InsertSyncOperationParams is used by the operation transaction after domain
-// work has succeeded or been classified as a terminal rejection.
+// InsertSyncOperationParams is used by an operation transaction to reserve
+// an idempotency key before domain work. The response and status are finalized
+// by UpdateSyncOperation before the enclosing transaction commits.
 type InsertSyncOperationParams struct {
+	DeviceID    uuid.UUID
+	OpID        uuid.UUID
+	UserID      uuid.UUID
+	Status      string
+	Reason      *string
+	Response    []byte
+	CompletedAt *time.Time
+}
+
+// UpdateSyncOperationParams finalizes an operation outcome that was reserved
+// at the start of the same synchronization transaction. The response is the
+// exact operation-result JSON returned by the protocol.
+type UpdateSyncOperationParams struct {
 	DeviceID    uuid.UUID
 	OpID        uuid.UUID
 	UserID      uuid.UUID

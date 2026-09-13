@@ -260,6 +260,15 @@ FROM devices
 WHERE id = $2 AND user_id = $1
 ON CONFLICT (device_id, op_id) DO NOTHING
 RETURNING device_id, op_id, user_id, status, reason, response, received_at, completed_at`
+
+	updateSyncOperationSQL = `
+UPDATE sync_ops
+SET status = $4,
+    reason = $5,
+    response = $6,
+    completed_at = $7
+WHERE user_id = $1 AND device_id = $2 AND op_id = $3
+RETURNING device_id, op_id, user_id, status, reason, response, received_at, completed_at`
 )
 
 // Queries is the typed query/data-access object. It can be bound to a pool for
@@ -725,10 +734,10 @@ func (q *Queries) GetSyncOperation(ctx context.Context, userID, deviceID, opID u
 		uuidArg(userID), uuidArg(deviceID), uuidArg(opID)))
 }
 
-// TryInsertSyncOperation atomically records an operation outcome. inserted is
+// TryInsertSyncOperation atomically reserves an operation key. inserted is
 // false when the composite (device_id, op_id) already exists; callers can then
-// use GetSyncOperation to replay the stored response without reapplying domain
-// logic.
+// leave duplicate-response replay to the synchronization layer without
+// reapplying domain logic.
 func (q *Queries) TryInsertSyncOperation(ctx context.Context, params InsertSyncOperationParams) (operation SyncOperation, inserted bool, err error) {
 	row := q.db.QueryRow(ctx, tryInsertSyncOperationSQL,
 		uuidArg(params.UserID),
@@ -748,6 +757,20 @@ func (q *Queries) TryInsertSyncOperation(ctx context.Context, params InsertSyncO
 		return SyncOperation{}, false, err
 	}
 	return operation, true, nil
+}
+
+// UpdateSyncOperation finalizes a previously reserved operation outcome in the
+// same transaction as its domain mutation and change-log entry.
+func (q *Queries) UpdateSyncOperation(ctx context.Context, params UpdateSyncOperationParams) (SyncOperation, error) {
+	return scanSyncOperation(q.db.QueryRow(ctx, updateSyncOperationSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.DeviceID),
+		uuidArg(params.OpID),
+		params.Status,
+		optionalStringArg(params.Reason),
+		params.Response,
+		optionalTimeArg(params.CompletedAt),
+	))
 }
 
 func scanProduct(row pgx.Row) (Product, error) {
