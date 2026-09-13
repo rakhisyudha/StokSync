@@ -31,7 +31,7 @@
 - [x] 1.6 Build product browse/search/detail/create/edit/soft-delete flows backed only by local data.
 - [x] 1.7 Integrate `mobile_scanner`: permissions, allowed formats, duplicate-read debounce, matching-product navigation, and unknown-barcode product creation.
 - [x] 1.8 Build receive, issue, adjustment, reversal, and stocktake entry flows with notes and validation.
-- [ ] 1.9 Add a local sync-status shell showing queued count, conflicts count, and last known status, even before remote sync exists.
+- [x] 1.9 Add a local sync-status shell showing queued count, conflicts count, and last known status, even before remote sync exists.
 
 **Milestone validation:** In airplane mode, create products, scan or manually enter a barcode, record movements, force-close/relaunch, and verify all data remains. Rebuild balances and prove they equal the sum of each product ledger. Low-stock queries update reactively.
 

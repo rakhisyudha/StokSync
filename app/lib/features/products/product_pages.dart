@@ -5,6 +5,7 @@ import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
 import '../movements/movement_pages.dart';
+import '../sync/sync_status_widgets.dart';
 import 'barcode_scanner_page.dart';
 import 'product_providers.dart';
 import 'product_search.dart';
@@ -55,6 +56,7 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
       ),
       body: Column(
         children: [
+          const LocalSyncStatusCard(),
           Padding(
             padding: const EdgeInsets.all(16),
             child: TextField(

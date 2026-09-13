@@ -15,9 +15,12 @@ void main() {
     'browses, searches, creates, edits, details, and soft-deletes locally',
     (tester) async {
       final harness = _ProductFlowHarness();
-      addTearDown(harness.close);
       addTearDown(() async {
         await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump();
+        await harness.close();
         await tester.pump(const Duration(milliseconds: 1));
       });
 
