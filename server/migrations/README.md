@@ -1,11 +1,12 @@
 # PostgreSQL migrations
 
 These versioned SQL files are applied by the pinned `migrate/migrate:v4.17.1`
-container configured in the repository root `docker-compose.yml`. The initial
-migration creates the canonical authentication, device, catalog, ledger,
-balance-projection, change-feed, idempotency, and sync-cursor tables. Domain
-checks, foreign keys, and secondary indexes are intentionally reserved for the
-follow-up schema migration in task 2.2.
+container configured in the repository root `docker-compose.yml`. Migration
+`000001` creates the canonical authentication, device, catalog, ledger,
+balance-projection, change-feed, idempotency, and sync-cursor tables. Migration
+`000002` adds ownership-aware foreign keys, domain checks, active-barcode
+uniqueness, the composite idempotency primary key, and indexes for the
+server/synchronization access paths.
 
 ## Reproducible local smoke check
 
@@ -27,3 +28,18 @@ docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB
 The expected output is a table count of `9`, followed by `1|0`. The migration
 runner records the applied version in `schema_migrations`; rerunning the `up`
 command is safe because the runner tracks applied versions.
+
+## Constraint validation
+
+`validate_constraints.sql` inserts valid fixture rows, checks non-zero deltas,
+allowed movement kinds, product versions, ownership-aware foreign keys, active
+barcode behavior, and composite idempotency semantics, then rolls everything
+back. Run it after applying the migrations:
+
+```powershell
+Get-Content server/migrations/validate_constraints.sql |
+  docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+A successful run prints `000002 constraint validation passed` and leaves the
+database unchanged.
