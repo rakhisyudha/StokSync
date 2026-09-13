@@ -53,8 +53,8 @@
 - [x] 3.1 Define versioned JSON DTOs for sync requests, operations, operation results, change entries, and responses. Enforce request limits and schema-version handling.
 - [x] 3.2 Implement `POST /v1/sync` in Chi with authenticated user/device validation and per-operation transactions.
 - [x] 3.3 Implement `add_movement`, `upsert_product`, and `delete_product` operations on the server. Persist an idempotency outcome and its response atomically with each operation.
-- [ ] 3.4 On duplicate `(device_id, op_id)`, return the originally stored operation response exactly and do not reapply domain logic.
-- [ ] 3.5 Implement the pure Dart transport interface, HTTP implementation, operation serialization, response decoding, and server-time clock-offset persistence.
+- [x] 3.4 On duplicate `(device_id, op_id)`, return the originally stored operation response exactly and do not reapply domain logic.
+- [x] 3.5 Implement the pure Dart transport interface, HTTP implementation, operation serialization, response decoding, and server-time clock-offset persistence.
 - [ ] 3.6 Implement a sync mutex, due FIFO operation selection, retry classification, exponential backoff with jitter, and interruption-safe pending-operation states.
 - [ ] 3.7 Reconcile successful and rejected push results into Drift; remove applied queue items only in a transaction that persists their canonical consequence. Store terminal errors/conflicts.
 - [ ] 3.8 Add unit/integration tests for duplicate delivery, lost response, partial-batch success, server error retries, and retry persistence across restart.

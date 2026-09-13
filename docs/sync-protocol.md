@@ -19,7 +19,7 @@ The routes currently implemented are:
 | `POST /v1/auth/refresh` | None; opaque refresh token in the body | Rotates a refresh token and returns a replacement access/refresh-token pair. |
 | `POST /v1/auth/logout` | `Authorization: Bearer <access-token>` | Revokes active refresh sessions for the authenticated device. It returns `204` with no body. |
 | `GET /v1/snapshot` | `Authorization: Bearer <access-token>` | Returns the complete account-scoped bootstrap replica and a consistent cursor. |
-| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.3 applies `add_movement`, `upsert_product`, and `delete_product` atomically with balances, change-log entries, and durable operation outcomes; incremental change-feed response pages remain a later task. |
+| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.3 applies `add_movement`, `upsert_product`, and `delete_product` atomically with balances, change-log entries, and durable operation outcomes; Task 3.4 replays the stored operation outcome for duplicate `(device_id, op_id)` delivery. Incremental change-feed response pages remain a later task. |
 
 ### Sync DTO contract (Milestone 3.1)
 
@@ -102,17 +102,31 @@ processed. Unexpected database failures roll back the domain mutation, change
 log, and reserved outcome together.
 
 A duplicate idempotency key is detected by the atomic `(device_id, op_id)`
-reservation. The current Task 3.3 seam rolls that transaction back and returns a
-stable `duplicate_operation` rejection without reapplying domain logic. Exact
-stored-response replay is intentionally deferred to Task 3.4. The authenticated
+reservation. The server then reads the previously committed `sync_ops` row
+using the authenticated `(user_id, device_id, op_id)` scope and returns its
+stored operation-result JSON as the canonical outcome. It does not invoke
+operation validation or domain application, append a change-log entry, update a
+balance, or overwrite the stored response. A missing, malformed, or
+scope-mismatched stored response fails the duplicate transaction as an
+internal error rather than applying the incoming operation. The authenticated
 user/device ownership checks remain in force for every operation and canonical
 foreign-key/domain service write.
 
 The response still has the complete push/pull shape (`results`, `changes`,
 `next_cursor`, `has_more`, and `server_time`). Task 3.3 returns each applied
-operation's allocated sequence in its result, but the `changes` array remains
+operation's allocated sequence in its result, and Task 3.4 reuses that exact
+stored operation result for duplicate delivery. The `changes` array remains
 empty and the request cursor is preserved until incremental change-feed reads
 are implemented in Task 4.1.
+
+The client transport records a rolling server-clock offset after each valid
+response. It computes `server_time - midpoint(request_sent_at,
+response_received_at)` in milliseconds and persists the value in the local
+`sync_state.server_clock_offset_ms` field through an app-side Drift adapter.
+This offset is a clock hint for later local timestamp creation; it does not
+change cursor advancement, queue selection, retry scheduling, or response
+reconciliation.
+
 ### Authentication requests and sessions
 
 `register` and `login` accept the same JSON shape:

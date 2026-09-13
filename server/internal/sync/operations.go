@@ -1,9 +1,12 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +36,6 @@ const (
 	ReasonMovementConflict    = "movement_conflict"
 	ReasonOwnershipViolation  = "ownership_violation"
 	ReasonDeviceMismatch      = "device_mismatch"
-	ReasonDuplicateOperation  = "duplicate_operation"
 
 	syncOperationStatusProcessing = "processing"
 
@@ -43,7 +45,7 @@ const (
 	changeOpDelete       = "delete"
 )
 
-var ErrDuplicateOperation = errors.New("sync operation already exists")
+var ErrInvalidStoredOperationResponse = errors.New("stored sync operation response is invalid")
 
 type operationChange struct {
 	Entity   string
@@ -73,10 +75,11 @@ func (s *Service) processOperation(ctx context.Context, queries *db.Queries, ide
 	}); err != nil {
 		return OperationResult{}, err
 	} else if !inserted {
-		// The transaction is deliberately failed so a duplicate cannot commit
-		// any domain or change-log work. Task 3.4 will replace this seam with
-		// exact stored-response replay.
-		return OperationResult{}, ErrDuplicateOperation
+		stored, err := queries.GetSyncOperation(ctx, identity.UserID, identity.DeviceID, operation.OpID)
+		if err != nil {
+			return OperationResult{}, fmt.Errorf("%w: lookup failed: %v", ErrInvalidStoredOperationResponse, err)
+		}
+		return replayStoredOperation(identity, operation.OpID, stored)
 	}
 
 	result, change, err := s.applyOperation(ctx, queries, identity, operation)
@@ -100,6 +103,44 @@ func (s *Service) processOperation(ctx context.Context, queries *db.Queries, ide
 	}
 	if err := s.finalizeOperation(ctx, queries, identity, operation.OpID, result); err != nil {
 		return OperationResult{}, err
+	}
+	return result, nil
+}
+
+func replayStoredOperation(identity auth.Identity, operationID uuid.UUID, stored db.SyncOperation) (OperationResult, error) {
+	if stored.UserID != identity.UserID || stored.DeviceID != identity.DeviceID || stored.OpID != operationID {
+		return OperationResult{}, fmt.Errorf("%w: stored operation scope does not match request", ErrInvalidStoredOperationResponse)
+	}
+	if len(bytes.TrimSpace(stored.Response)) == 0 {
+		return OperationResult{}, fmt.Errorf("%w: response is empty", ErrInvalidStoredOperationResponse)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(stored.Response))
+	decoder.DisallowUnknownFields()
+	var result OperationResult
+	if err := decoder.Decode(&result); err != nil {
+		return OperationResult{}, fmt.Errorf("%w: decode response: %v", ErrInvalidStoredOperationResponse, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return OperationResult{}, fmt.Errorf("%w: response contains trailing JSON", ErrInvalidStoredOperationResponse)
+		}
+		return OperationResult{}, fmt.Errorf("%w: response contains trailing data: %v", ErrInvalidStoredOperationResponse, err)
+	}
+	if result.OpID != operationID {
+		return OperationResult{}, fmt.Errorf("%w: response operation id does not match request", ErrInvalidStoredOperationResponse)
+	}
+
+	validation := NewSyncResponse(
+		[]OperationResult{result},
+		[]ChangeEntry{},
+		0,
+		false,
+		time.Unix(0, 0).UTC(),
+	).Validate()
+	if validation != nil {
+		return OperationResult{}, fmt.Errorf("%w: invalid operation result: %v", ErrInvalidStoredOperationResponse, validation)
 	}
 	return result, nil
 }

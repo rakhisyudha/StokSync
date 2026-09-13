@@ -1,8 +1,7 @@
-/// Support for doing something awesome.
-///
-/// More dartdocs go here.
+/// Framework-independent transport and protocol types for StokSync sync.
 library;
 
-export 'src/sync_engine_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
+export 'src/clock.dart';
+export 'src/errors.dart';
+export 'src/protocol.dart';
+export 'src/transport.dart';

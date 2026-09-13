@@ -204,29 +204,150 @@ func TestServiceRollsBackDomainAndReservedOutcomeWhenChangeLogFails(t *testing.T
 	}
 }
 
-func TestServiceDetectsDuplicateBeforeDomainApplication(t *testing.T) {
+func TestServiceReplaysAppliedDuplicateWithoutDomainOrChangeLog(t *testing.T) {
 	t.Parallel()
 
 	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	opID := uuid.New()
+	storedResponse := []byte(fmt.Sprintf(` { "op_id":%q, "status":"applied", "seq":91 } `, opID.String()))
 	operation := Operation{
-		OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(1),
-		Payload: mustJSON(t, DeleteProductPayload{ID: uuid.New()}),
+		OpID:    opID,
+		Op:      "not_a_supported_operation",
+		Payload: []byte(`not-json`),
 	}
-	tx := &syncScriptedTx{rows: []pgx.Row{syncErrorRow(pgx.ErrNoRows)}}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(identity, opID, ResultStatusApplied, storedResponse),
+	}}
 	service := newScriptedSyncService(t, tx)
 
 	result, err := service.ProcessOperation(context.Background(), identity, operation)
 	if err != nil {
 		t.Fatalf("ProcessOperation() error = %v", err)
 	}
-	if result.Status != ResultStatusRejected || result.Reason != ReasonDuplicateOperation {
-		t.Fatalf("result = %#v, want duplicate-operation seam rejection", result)
+	wantSeq := int64(91)
+	want := OperationResult{OpID: opID, Status: ResultStatusApplied, Seq: &wantSeq}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("result = %#v, want stored result %#v", result, want)
 	}
+	assertDuplicateReplayTransaction(t, tx)
+}
+
+func TestServiceReplaysRejectedDuplicateWithCanonicalFields(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	opID := uuid.New()
+	serverState := json.RawMessage(`{"id":"canonical-product","version":9}`)
+	storedResponse := []byte(fmt.Sprintf(`{"op_id":%q,"status":"rejected","reason":"barcode_conflict","server_state":%s}`, opID.String(), serverState))
+	operation := Operation{
+		OpID:    opID,
+		Op:      "not_a_supported_operation",
+		Payload: []byte(`not-json`),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(identity, opID, ResultStatusRejected, storedResponse),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	want := OperationResult{OpID: opID, Status: ResultStatusRejected, Reason: "barcode_conflict", ServerState: serverState}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("result = %#v, want stored result %#v", result, want)
+	}
+	assertDuplicateReplayTransaction(t, tx)
+}
+
+func TestServiceRejectsDuplicateWhenStoredResponseIsMalformed(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	opID := uuid.New()
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(identity, opID, ResultStatusApplied, []byte(`{"op_id":`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	_, err := service.ProcessOperation(context.Background(), identity, Operation{OpID: opID})
+	if !errors.Is(err, ErrInvalidStoredOperationResponse) {
+		t.Fatalf("ProcessOperation() error = %v, want invalid stored response", err)
+	}
+	assertDuplicateReplayRollback(t, tx)
+}
+
+func TestServiceRejectsDuplicateWhenStoredResponseIsMissing(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	opID := uuid.New()
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(identity, opID, ResultStatusRejected, nil),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	_, err := service.ProcessOperation(context.Background(), identity, Operation{OpID: opID})
+	if !errors.Is(err, ErrInvalidStoredOperationResponse) {
+		t.Fatalf("ProcessOperation() error = %v, want invalid stored response", err)
+	}
+	assertDuplicateReplayRollback(t, tx)
+}
+
+func TestServiceDoesNotReplayDuplicateOutsideAuthenticatedScope(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	otherIdentity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	opID := uuid.New()
+	storedResponse := []byte(fmt.Sprintf(`{"op_id":%q,"status":"applied","seq":17}`, opID.String()))
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(otherIdentity, opID, ResultStatusApplied, storedResponse),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	_, err := service.ProcessOperation(context.Background(), identity, Operation{OpID: opID})
+	if !errors.Is(err, ErrInvalidStoredOperationResponse) {
+		t.Fatalf("ProcessOperation() error = %v, want scoped replay failure", err)
+	}
+	if len(tx.args) != 2 {
+		t.Fatalf("query args = %d, want reservation and scoped lookup", len(tx.args))
+	}
+	assertSyncUUIDArg(t, tx.args[1][0], identity.UserID)
+	assertSyncUUIDArg(t, tx.args[1][1], identity.DeviceID)
+	assertSyncUUIDArg(t, tx.args[1][2], opID)
+	assertDuplicateReplayRollback(t, tx)
+}
+
+func assertDuplicateReplayTransaction(t *testing.T, tx *syncScriptedTx) {
+	t.Helper()
+	if len(tx.queries) != 2 || !strings.Contains(tx.queries[0], "INSERT INTO sync_ops") || !strings.Contains(tx.queries[1], "SELECT device_id, op_id, user_id") {
+		t.Fatalf("duplicate replay queries = %#v, want reservation followed by scoped lookup", tx.queries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("duplicate replay transaction lifecycle = (commit %d, rollback %d), want (1, 0)", tx.commitCalls, tx.rollbackCalls)
+	}
+	for _, query := range tx.queries {
+		if strings.Contains(query, "UPDATE sync_ops") || strings.Contains(query, "INSERT INTO change_log") {
+			t.Fatalf("duplicate replay mutated durable outcome/change log with query %q", query)
+		}
+	}
+}
+
+func assertDuplicateReplayRollback(t *testing.T, tx *syncScriptedTx) {
+	t.Helper()
 	if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
-		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want rollback without replay", tx.commitCalls, tx.rollbackCalls)
+		t.Fatalf("duplicate replay failure transaction lifecycle = (commit %d, rollback %d), want (0, 1)", tx.commitCalls, tx.rollbackCalls)
 	}
-	if len(tx.queries) != 1 || !strings.Contains(tx.queries[0], "INSERT INTO sync_ops") {
-		t.Fatalf("queries = %#v, want only atomic idempotency reservation", tx.queries)
+	for _, query := range tx.queries {
+		if strings.Contains(query, "UPDATE sync_ops") || strings.Contains(query, "INSERT INTO change_log") {
+			t.Fatalf("duplicate replay failure mutated durable outcome/change log with query %q", query)
+		}
 	}
 }
 
@@ -464,6 +585,17 @@ func syncChangeRow(sequence int64, userID uuid.UUID, entity string, entityID uui
 
 func syncUUIDArg(value uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: value, Valid: true}
+}
+
+func assertSyncUUIDArg(t *testing.T, value any, want uuid.UUID) {
+	t.Helper()
+	got, ok := value.(pgtype.UUID)
+	if !ok {
+		t.Fatalf("argument type = %T, want pgtype.UUID", value)
+	}
+	if !got.Valid || uuid.UUID(got.Bytes) != want {
+		t.Errorf("UUID argument = %#v, want %s", got, want)
+	}
 }
 
 func syncTimePointer(value time.Time) *time.Time {

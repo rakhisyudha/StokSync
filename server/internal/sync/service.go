@@ -105,20 +105,9 @@ func (s *Service) ProcessOperation(ctx context.Context, identity auth.Identity, 
 		return OperationResult{}, ErrInvalidIdentity
 	}
 
-	result, err := db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (OperationResult, error) {
+	return db.WithTxResult(ctx, s.beginner, func(queries *db.Queries) (OperationResult, error) {
 		return s.operationHandler(ctx, queries, identity, operation)
 	})
-	if errors.Is(err, ErrDuplicateOperation) {
-		// The duplicate transaction was rolled back after the atomic conflict
-		// check. Replaying the stored response belongs to Task 3.4; this seam
-		// deliberately reports a stable result without applying domain logic.
-		return OperationResult{
-			OpID:   operation.OpID,
-			Status: ResultStatusRejected,
-			Reason: ReasonDuplicateOperation,
-		}, nil
-	}
-	return result, err
 }
 
 func rejectOperation(_ context.Context, _ *db.Queries, _ auth.Identity, operation Operation) (OperationResult, error) {

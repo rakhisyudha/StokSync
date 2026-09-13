@@ -121,6 +121,43 @@ func TestGetStockMovementMapsImmutableLedgerFields(t *testing.T) {
 	}
 }
 
+func TestGetSyncOperationUsesFullScopeAndPreservesResponseBytes(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.MustParse("00000000-0000-4000-8000-000000000024")
+	deviceID := uuid.MustParse("00000000-0000-4000-8000-000000000025")
+	opID := uuid.MustParse("00000000-0000-4000-8000-000000000026")
+	receivedAt := time.Date(2026, time.April, 6, 7, 8, 9, 0, time.UTC)
+	response := []byte(" { \"op_id\":\"00000000-0000-4000-8000-000000000026\", \"status\":\"rejected\", \"reason\":\"barcode_conflict\"} ")
+	fake := &fakeQueryDB{row: staticRow{values: []any{
+		uuidArg(deviceID),
+		uuidArg(opID),
+		uuidArg(userID),
+		"rejected",
+		pgtype.Text{String: "barcode_conflict", Valid: true},
+		response,
+		receivedAt,
+		pgtype.Timestamptz{},
+	}}}
+
+	operation, err := NewQueries(fake).GetSyncOperation(context.Background(), userID, deviceID, opID)
+	if err != nil {
+		t.Fatalf("GetSyncOperation() error = %v", err)
+	}
+	if !reflect.DeepEqual(operation.Response, response) {
+		t.Fatalf("Response = %q, want exact stored bytes %q", operation.Response, response)
+	}
+	if operation.UserID != userID || operation.DeviceID != deviceID || operation.OpID != opID {
+		t.Fatalf("operation scope = %#v, want user/device/op scope", operation)
+	}
+	if !strings.Contains(fake.lastQuery, "WHERE user_id = $1 AND device_id = $2 AND op_id = $3") {
+		t.Fatalf("query = %q, want full idempotency scope predicate", fake.lastQuery)
+	}
+	assertUUIDArg(t, fake.lastArgs[0], userID)
+	assertUUIDArg(t, fake.lastArgs[1], deviceID)
+	assertUUIDArg(t, fake.lastArgs[2], opID)
+}
+
 func TestTryInsertSyncOperationReturnsDuplicateWithoutApplyingIt(t *testing.T) {
 	t.Parallel()
 
