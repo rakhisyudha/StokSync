@@ -20,9 +20,76 @@ The routes implemented at the end of Milestone 2 are:
 | `POST /v1/auth/logout` | `Authorization: Bearer <access-token>` | Revokes active refresh sessions for the authenticated device. It returns `204` with no body. |
 | `GET /v1/snapshot` | `Authorization: Bearer <access-token>` | Returns the complete account-scoped bootstrap replica and a consistent cursor. |
 
-`POST /v1/sync` is not implemented yet. It is intentionally not included in
-the HTTP smoke test; its versioned DTO and push/pull behavior belong to
-Milestone 3.
+`POST /v1/sync` is not implemented yet and is intentionally not included in
+the HTTP smoke test. Task 3.1 defines its versioned DTO boundary below;
+request handling and operation application are implemented in later Milestone 3
+tasks.
+
+### Sync DTO contract (Milestone 3.1)
+
+The sync DTOs use `schema_version: 1` and reject every other version. A request
+contains the authenticated device identifier, a non-negative cursor, a bounded
+`max_changes` page size, an RFC 3339 `client_time`, and an `ops` array (use an
+empty array when there is no push work):
+
+```json
+{
+  "schema_version": 1,
+  "device_id": "0192f200-0000-7000-8000-000000000001",
+  "cursor": 1482,
+  "max_changes": 500,
+  "client_time": "2026-09-13T10:02:14Z",
+  "ops": [
+    {
+      "op_id": "0192f3a1-0000-7000-8000-000000000001",
+      "op": "add_movement",
+      "payload": {
+        "id": "0192f3a0-0000-7000-8000-000000000001",
+        "product_id": "0192e1aa-0000-7000-8000-000000000001",
+        "delta": -3,
+        "kind": "issue",
+        "occurred_at": "2026-09-13T09:41:02Z"
+      }
+    }
+  ]
+}
+```
+
+The supported operation envelopes are `add_movement`, `upsert_product`, and
+`delete_product`. Each requires a UUID `op_id` and a JSON-object payload;
+`base_version` is optional for versioned product mutations. Payload fields are
+strictly decoded. Movement payloads require `id`, `product_id`, non-zero
+`delta`, a supported `kind`, and `occurred_at`; product upserts require `id`
+and `name`; deletes require `id`. Optional movement audit fields include
+`raw_occurred_at`, `clock_offset_ms`, `counted_qty`, `reverses_id`, and
+`device_id`.
+
+A successful response includes `schema_version`, independent per-operation
+`results`, an ordered `changes` page, `next_cursor`, `has_more`, and UTC
+`server_time`:
+
+```json
+{
+  "schema_version": 1,
+  "results": [
+    { "op_id": "0192f3a1-0000-7000-8000-000000000001", "status": "applied", "seq": 1483 },
+    { "op_id": "0192f3a2-0000-7000-8000-000000000001", "status": "rejected", "reason": "version_conflict", "server_state": { "id": "...", "version": 9 } }
+  ],
+  "changes": [
+    { "seq": 1483, "entity": "stock_movement", "op": "upsert", "data": {} }
+  ],
+  "next_cursor": 1483,
+  "has_more": false,
+  "server_time": "2026-09-13T10:02:15Z"
+}
+```
+
+The strict decoder rejects unknown fields, missing required fields, malformed
+UUIDs/timestamps, trailing JSON values, and non-object operation payloads. The
+default bounds are a 1 MiB request body, 100 operations, 500 requested or
+returned changes, and a 256 KiB individual operation payload. Deployments may
+lower these limits. Unsupported schema errors use
+`{"schema_version":1,"error":"unsupported_schema_version","min_supported_version":1}`.
 
 ### Authentication requests and sessions
 
