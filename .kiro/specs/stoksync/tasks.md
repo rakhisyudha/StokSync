@@ -65,7 +65,7 @@
 
 - [x] 4.1 Implement server change-feed reads ordered by `seq > cursor`, bounded by `max_changes`, returning `next_cursor` and `has_more`.
 - [x] 4.2 Implement snapshot bootstrap on the client: write all snapshot data, balances/projections, and initial cursor in one SQLite transaction.
-- [ ] 4.3 Implement idempotent remote upsert/tombstone application for products and movements.
+- [x] 4.3 Implement idempotent remote upsert/tombstone application for products and movements.
 - [ ] 4.4 Advance the local cursor only in the same SQLite transaction as the complete applied change page.
 - [ ] 4.5 Complete the push-then-pull loop with pagination until `has_more` is false.
 - [ ] 4.6 Connect sync triggers to application foreground, debounced local writes, manual refresh, foreground interval, and connectivity hints. Confirm reachability through health/sync rather than interface state alone.
