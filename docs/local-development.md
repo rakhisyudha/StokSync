@@ -25,7 +25,7 @@ Docker Compose provides PostgreSQL for local development only; it does not run t
    docker compose --profile tools run --rm migrate
    ```
 
-   The runner reads `server/migrations`. It is intentionally empty until schema migrations are introduced; running it before then completes with no schema changes.
+   The runner reads the versioned SQL files in `server/migrations` and records applied versions in PostgreSQL. After applying them, use the smoke check in [`server/migrations/README.md`](../server/migrations/README.md) to verify the expected tables and seeded synchronization cursor.
 
 ## Useful commands
 

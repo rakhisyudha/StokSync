@@ -37,7 +37,7 @@
 
 ## Milestone 2 — Go/Chi server and canonical data model
 
-- [ ] 2.1 Create PostgreSQL migrations for users, devices, refresh tokens, products, stock movements, product balances, `change_log`, `sync_ops`, and `sync_seq_counter`.
+- [x] 2.1 Create PostgreSQL migrations for users, devices, refresh tokens, products, stock movements, product balances, `change_log`, `sync_ops`, and `sync_seq_counter`.
 - [ ] 2.2 Add database constraints and indexes: non-zero deltas, allowed movement kinds, foreign keys, active-barcode partial uniqueness, product version, and `(device_id, op_id)` idempotency primary key.
 - [ ] 2.3 Implement `pgx` connection pooling and `sqlc` queries (or explicitly documented equivalent) for domain and synchronization transactions.
 - [ ] 2.4 Implement password hashing, login, device registration, access-token issuance, refresh-token rotation/revocation, and Chi authentication middleware.

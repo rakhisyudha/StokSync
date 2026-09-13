@@ -1,0 +1,9 @@
+DROP TABLE sync_ops;
+DROP TABLE change_log;
+DROP TABLE sync_seq_counter;
+DROP TABLE product_balances;
+DROP TABLE stock_movements;
+DROP TABLE products;
+DROP TABLE refresh_tokens;
+DROP TABLE devices;
+DROP TABLE users;
