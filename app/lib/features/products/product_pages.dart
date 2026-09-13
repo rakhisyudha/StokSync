@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
+import 'barcode_scanner_page.dart';
 import 'product_providers.dart';
 import 'product_search.dart';
 
@@ -30,11 +31,26 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Products')),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-product-button'),
-        onPressed: _createProduct,
-        icon: const Icon(Icons.add),
-        label: const Text('Add product'),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            key: const Key('scan-product-button'),
+            heroTag: 'scan-product-fab',
+            onPressed: _scanProduct,
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan barcode'),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            key: const Key('add-product-button'),
+            heroTag: 'add-product-fab',
+            onPressed: _createProduct,
+            icon: const Icon(Icons.add),
+            label: const Text('Add product'),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -105,6 +121,19 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
           onTap: () => _openProduct(product.id),
         );
       },
+    );
+  }
+
+  Future<void> _scanProduct() {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => BarcodeScannerPage(
+          matchedProductPageBuilder: (productId) =>
+              ProductDetailPage(productId: productId),
+          createProductPageBuilder: (barcode) =>
+              ProductFormPage(initialBarcode: barcode),
+        ),
+      ),
     );
   }
 
@@ -286,14 +315,20 @@ class _ProductDetailField extends StatelessWidget {
 
 /// Form for creating or editing a product through the local repository.
 class ProductFormPage extends ConsumerStatefulWidget {
-  const ProductFormPage({super.key, this.productId, this.initial})
-    : assert(
-        (productId == null && initial == null) ||
-            (productId != null && initial != null),
-      );
+  const ProductFormPage({
+    super.key,
+    this.productId,
+    this.initial,
+    this.initialBarcode,
+  }) : assert(
+         (productId == null && initial == null) ||
+             (productId != null && initial != null),
+       ),
+       assert(productId == null || initialBarcode == null);
 
   final String? productId;
   final Product? initial;
+  final String? initialBarcode;
 
   bool get isEditing => productId != null;
 
@@ -317,7 +352,9 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
     super.initState();
     final initial = widget.initial;
     _nameController = TextEditingController(text: initial?.name ?? '');
-    _barcodeController = TextEditingController(text: initial?.barcode ?? '');
+    _barcodeController = TextEditingController(
+      text: initial?.barcode ?? widget.initialBarcode ?? '',
+    );
     _skuController = TextEditingController(text: initial?.sku ?? '');
     _descriptionController = TextEditingController(
       text: initial?.description ?? '',
