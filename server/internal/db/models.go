@@ -108,6 +108,15 @@ type ProductBalance struct {
 	UpdatedAt      time.Time
 }
 
+// LedgerBalance is the canonical balance computed directly from immutable
+// stock_movements. It is intentionally separate from ProductBalance so callers
+// cannot mistake the rebuildable projection for the source of truth.
+type LedgerBalance struct {
+	ProductID      uuid.UUID
+	Qty            int64
+	LastMovementAt *time.Time
+}
+
 // UpsertProductBalanceParams sets a projection value, normally during a
 // rebuild or a transaction that has already applied a ledger movement.
 type UpsertProductBalanceParams struct {

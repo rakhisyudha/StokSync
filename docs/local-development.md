@@ -41,3 +41,25 @@ docker compose down -v
 ```
 
 `docker compose down -v` permanently deletes the local PostgreSQL data volume.
+## Product balance projection check
+
+The server keeps `product_balances` as a rebuildable read projection; the
+immutable `stock_movements` ledger remains canonical. After setting
+`STOKSYNC_DATABASE_URL` (or loading `server/.env` in the shell), verify one
+account with:
+
+```powershell
+go run ./cmd/verify-projections -user-id <account-uuid>
+```
+
+The command exits non-zero and lists mismatches when a projection row is
+missing or differs from the ledger-derived quantity/latest movement time. To
+repair the projection and verify the repaired result, run:
+
+```powershell
+go run ./cmd/verify-projections -user-id <account-uuid> -rebuild
+```
+
+Both commands must be run from `server/`. They require migrations 000001
+through 000003 and a reachable PostgreSQL database; they do not expose an HTTP
+endpoint or change stock movement history.

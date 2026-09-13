@@ -33,6 +33,21 @@ SELECT
 FROM products
 WHERE user_id = $1 AND id = $2`
 
+	getProductByIDSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE id = $1`
+
+	getProductForUpdateSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE`
+
 	listProductsSQL = `
 SELECT
     id, user_id, barcode, sku, name, description, unit, category, min_stock,
@@ -88,6 +103,46 @@ SELECT
     clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
 FROM stock_movements
 WHERE user_id = $1 AND id = $2`
+
+	getStockMovementByIDSQL = `
+SELECT
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
+FROM stock_movements
+WHERE id = $1`
+
+	getProductLedgerBalanceSQL = `
+SELECT COALESCE(SUM(delta), 0)::bigint, MAX(occurred_at)
+FROM stock_movements
+WHERE user_id = $1 AND product_id = $2`
+
+	listLedgerBalancesSQL = `
+SELECT p.id, COALESCE(SUM(sm.delta), 0)::bigint, MAX(sm.occurred_at)
+FROM products AS p
+LEFT JOIN stock_movements AS sm
+    ON sm.user_id = p.user_id AND sm.product_id = p.id
+WHERE p.user_id = $1
+GROUP BY p.id
+ORDER BY p.id`
+
+	listProductBalancesSQL = `
+SELECT pb.product_id, pb.qty, pb.last_movement_at, pb.updated_at
+FROM product_balances AS pb
+JOIN products AS p ON p.id = pb.product_id AND p.user_id = $1
+ORDER BY pb.product_id`
+
+	rebuildProductBalancesSQL = `
+INSERT INTO product_balances (product_id, qty, last_movement_at)
+SELECT p.id, COALESCE(SUM(sm.delta), 0)::bigint, MAX(sm.occurred_at)
+FROM products AS p
+LEFT JOIN stock_movements AS sm
+    ON sm.user_id = p.user_id AND sm.product_id = p.id
+WHERE p.user_id = $1
+GROUP BY p.id
+ON CONFLICT (product_id) DO UPDATE
+SET qty = EXCLUDED.qty,
+    last_movement_at = EXCLUDED.last_movement_at,
+    updated_at = CURRENT_TIMESTAMP`
 
 	listStockMovementsSQL = `
 SELECT
@@ -217,6 +272,20 @@ func (q *Queries) GetProduct(ctx context.Context, userID, productID uuid.UUID) (
 	return scanProduct(q.db.QueryRow(ctx, getProductSQL, uuidArg(userID), uuidArg(productID)))
 }
 
+// GetProductByID returns a product without applying a user predicate. Services
+// use it only to classify an attempted mutation as missing versus cross-owner;
+// callers must not expose this lookup as a general account-scoped read.
+func (q *Queries) GetProductByID(ctx context.Context, productID uuid.UUID) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, getProductByIDSQL, uuidArg(productID)))
+}
+
+// GetProductForUpdate returns an active product in the user's account while
+// taking a row lock. Movement and stocktake transactions use this lock to
+// serialize canonical ledger calculations with other service mutations.
+func (q *Queries) GetProductForUpdate(ctx context.Context, userID, productID uuid.UUID) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, getProductForUpdateSQL, uuidArg(userID), uuidArg(productID)))
+}
+
 // ListProducts returns all products for a user when includeDeleted is true;
 // otherwise it returns only active catalog rows.
 func (q *Queries) ListProducts(ctx context.Context, userID uuid.UUID, includeDeleted bool) ([]Product, error) {
@@ -291,6 +360,90 @@ func (q *Queries) InsertStockMovement(ctx context.Context, params CreateStockMov
 // GetStockMovement returns a ledger row only from the requested user's scope.
 func (q *Queries) GetStockMovement(ctx context.Context, userID, movementID uuid.UUID) (StockMovement, error) {
 	return scanStockMovement(q.db.QueryRow(ctx, getStockMovementSQL, uuidArg(userID), uuidArg(movementID)))
+}
+
+// GetStockMovementByID is used internally to distinguish a missing movement
+// from a movement owned by another account before returning a domain error.
+func (q *Queries) GetStockMovementByID(ctx context.Context, movementID uuid.UUID) (StockMovement, error) {
+	return scanStockMovement(q.db.QueryRow(ctx, getStockMovementByIDSQL, uuidArg(movementID)))
+}
+
+// GetProductLedgerBalance computes the canonical quantity and latest
+// occurrence directly from immutable stock movements. It never reads the
+// product_balances projection.
+func (q *Queries) GetProductLedgerBalance(ctx context.Context, userID, productID uuid.UUID) (LedgerBalance, error) {
+	var qty int64
+	var lastMovementAt pgtype.Timestamptz
+	if err := q.db.QueryRow(ctx, getProductLedgerBalanceSQL,
+		uuidArg(userID), uuidArg(productID)).Scan(&qty, &lastMovementAt); err != nil {
+		return LedgerBalance{}, err
+	}
+	return LedgerBalance{
+		ProductID:      productID,
+		Qty:            qty,
+		LastMovementAt: timeFromPG(lastMovementAt),
+	}, nil
+}
+
+// ListLedgerBalances computes one canonical balance for every product in the
+// account directly from stock_movements, including zero-movement products.
+func (q *Queries) ListLedgerBalances(ctx context.Context, userID uuid.UUID) ([]LedgerBalance, error) {
+	rows, err := q.db.Query(ctx, listLedgerBalancesSQL, uuidArg(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	balances := make([]LedgerBalance, 0)
+	for rows.Next() {
+		var productID pgtype.UUID
+		var qty int64
+		var lastMovementAt pgtype.Timestamptz
+		if err := rows.Scan(&productID, &qty, &lastMovementAt); err != nil {
+			return nil, err
+		}
+		balances = append(balances, LedgerBalance{
+			ProductID:      uuidFromPG(productID),
+			Qty:            qty,
+			LastMovementAt: timeFromPG(lastMovementAt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return balances, nil
+}
+
+// ListProductBalances returns the stored projection rows for an account. The
+// account predicate is applied through products because product_balances is a
+// deliberately small projection keyed only by product ID.
+func (q *Queries) ListProductBalances(ctx context.Context, userID uuid.UUID) ([]ProductBalance, error) {
+	rows, err := q.db.Query(ctx, listProductBalancesSQL, uuidArg(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	balances := make([]ProductBalance, 0)
+	for rows.Next() {
+		balance, err := scanProductBalance(rows)
+		if err != nil {
+			return nil, err
+		}
+		balances = append(balances, balance)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return balances, nil
+}
+
+// RebuildProductBalances recomputes projection rows from the ledger in one
+// statement. It is a repair operation, never a source of truth for domain
+// decisions.
+func (q *Queries) RebuildProductBalances(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, rebuildProductBalancesSQL, uuidArg(userID))
+	return err
 }
 
 // ListStockMovements returns immutable ledger history in occurrence order.
