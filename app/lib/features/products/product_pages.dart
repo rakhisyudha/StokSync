@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
+import '../movements/movement_pages.dart';
 import 'barcode_scanner_page.dart';
 import 'product_providers.dart';
 import 'product_search.dart';
@@ -206,7 +207,9 @@ class ProductDetailPage extends ConsumerWidget {
                     padding: EdgeInsets.all(12),
                     child: Text('This product is deleted locally.'),
                   ),
-                ),
+                )
+              else
+                _MovementActionBar(productId: product.id),
               _ProductDetailField(label: 'Name', value: product.name),
               _ProductDetailField(label: 'Barcode', value: product.barcode),
               _ProductDetailField(label: 'SKU', value: product.sku),
@@ -220,6 +223,11 @@ class ProductDetailPage extends ConsumerWidget {
                 value: product.minStock?.toString(),
               ),
               _ProductDetailField(label: 'Unit', value: product.unit),
+              const SizedBox(height: 12),
+              _MovementHistorySection(
+                history: ref.watch(movementHistoryProvider(productId)),
+                canReverse: !isDeleted,
+              ),
               if (!isDeleted) ...[
                 const SizedBox(height: 24),
                 OutlinedButton.icon(
@@ -288,6 +296,167 @@ class ProductDetailPage extends ConsumerWidget {
     }
   }
 }
+
+class _MovementActionBar extends StatelessWidget {
+  const _MovementActionBar({required this.productId});
+
+  final String productId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const Key('movement-action-bar'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Stock actions', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonalIcon(
+              key: const Key('receive-stock-button'),
+              onPressed: () =>
+                  _openMovement(context, productId, MovementEntryMode.receive),
+              icon: const Icon(Icons.add_box_outlined),
+              label: const Text('Receive'),
+            ),
+            FilledButton.tonalIcon(
+              key: const Key('issue-stock-button'),
+              onPressed: () =>
+                  _openMovement(context, productId, MovementEntryMode.issue),
+              icon: const Icon(Icons.outbox_outlined),
+              label: const Text('Issue'),
+            ),
+            OutlinedButton.icon(
+              key: const Key('adjust-stock-button'),
+              onPressed: () => _openMovement(
+                context,
+                productId,
+                MovementEntryMode.adjustment,
+              ),
+              icon: const Icon(Icons.tune),
+              label: const Text('Adjust'),
+            ),
+            OutlinedButton.icon(
+              key: const Key('stocktake-button'),
+              onPressed: () => _openMovement(
+                context,
+                productId,
+                MovementEntryMode.stocktake,
+              ),
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Stocktake'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Future<void> _openMovement(
+    BuildContext context,
+    String productId,
+    MovementEntryMode mode,
+  ) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => MovementEntryPage(productId: productId, mode: mode),
+      ),
+    );
+  }
+}
+
+class _MovementHistorySection extends StatelessWidget {
+  const _MovementHistorySection({
+    required this.history,
+    required this.canReverse,
+  });
+
+  final AsyncValue<List<StockMovement>> history;
+  final bool canReverse;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const Key('movement-history-section'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Movement history',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        history.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => const Text('Movement history is unavailable.'),
+          data: (movements) {
+            if (movements.isEmpty) {
+              return const Text('No stock movements recorded yet.');
+            }
+            return ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: movements.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) => _MovementHistoryRow(
+                movement: movements[index],
+                canReverse: canReverse,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _MovementHistoryRow extends StatelessWidget {
+  const _MovementHistoryRow({required this.movement, required this.canReverse});
+
+  final StockMovement movement;
+  final bool canReverse;
+
+  @override
+  Widget build(BuildContext context) {
+    final details = <String>[
+      'Delta ${_signedMovementDelta(movement.delta)}',
+      if (movement.countedQty != null) 'Counted ${movement.countedQty}',
+      if (movement.note != null) movement.note!,
+    ];
+    return ListTile(
+      key: Key('movement-row-${movement.id}'),
+      contentPadding: EdgeInsets.zero,
+      title: Text(_movementKindLabel(movement.kind)),
+      subtitle: Text(details.join(' · ')),
+      trailing: canReverse
+          ? IconButton(
+              key: Key('reverse-movement-button-${movement.id}'),
+              tooltip: 'Reverse movement',
+              icon: const Icon(Icons.undo),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => MovementReversalPage(movement: movement),
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+String _movementKindLabel(String kind) {
+  return switch (kind) {
+    'receive' => 'Received stock',
+    'issue' => 'Issued stock',
+    'adjust' => 'Stock adjustment',
+    'stocktake' => 'Stocktake',
+    _ => 'Stock movement',
+  };
+}
+
+String _signedMovementDelta(int delta) => delta > 0 ? '+$delta' : '$delta';
 
 class _ProductDetailField extends StatelessWidget {
   const _ProductDetailField({required this.label, required this.value});
