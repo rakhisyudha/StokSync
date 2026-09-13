@@ -1,19 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/local/local_query_providers.dart';
+import 'sync_trigger_coordinator.dart';
+import 'sync_trigger_providers.dart';
 
-/// A local-only sync status surface for the period before remote sync exists.
+/// A local-first sync status surface with an optional manual trigger.
 ///
-/// Every value in this card comes from the Drift replica. It deliberately has
-/// no sync trigger or network dependency, so it remains truthful while the
-/// user is offline or before the remote sync engine is integrated.
+/// Counts and timestamps come from the Drift replica. When an authenticated
+/// runtime is supplied, the manual action delegates to the trigger coordinator,
+/// which confirms service reachability before sending queued work.
 class LocalSyncStatusCard extends ConsumerWidget {
   const LocalSyncStatusCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final summary = ref.watch(syncSummaryProvider);
+    final coordinator = ref.watch(syncTriggerCoordinatorProvider);
     return Card(
       key: const Key('sync-status-card'),
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -22,7 +27,8 @@ class LocalSyncStatusCard extends ConsumerWidget {
         child: summary.when(
           loading: () => const _LocalSyncStatusLoading(),
           error: (_, _) => const _LocalSyncStatusUnavailable(),
-          data: (value) => _LocalSyncStatusContent(summary: value),
+          data: (value) =>
+              _LocalSyncStatusContent(summary: value, coordinator: coordinator),
         ),
       ),
     );
@@ -62,9 +68,13 @@ String localSyncLastKnownStatus(SyncSummary summary) {
 }
 
 class _LocalSyncStatusContent extends StatelessWidget {
-  const _LocalSyncStatusContent({required this.summary});
+  const _LocalSyncStatusContent({
+    required this.summary,
+    required this.coordinator,
+  });
 
   final SyncSummary summary;
+  final SyncTriggerCoordinator? coordinator;
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +93,15 @@ class _LocalSyncStatusContent extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
+            if (coordinator != null)
+              IconButton(
+                key: const Key('manual-sync-button'),
+                tooltip: 'Sync now',
+                icon: const Icon(Icons.sync),
+                onPressed: () {
+                  unawaited(coordinator!.manualRefresh());
+                },
+              ),
             Chip(
               key: const Key('sync-status-label'),
               label: Text(status),
@@ -117,7 +136,7 @@ class _LocalSyncStatusContent extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          'Local status is stored on this device; no network request is made.',
+          'Status counts are local; sync checks reachability before sending work.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],

@@ -68,7 +68,7 @@
 - [x] 4.3 Implement idempotent remote upsert/tombstone application for products and movements.
 - [x] 4.4 Advance the local cursor only in the same SQLite transaction as the complete applied change page.
 - [x] 4.5 Complete the push-then-pull loop with pagination until `has_more` is false.
-- [ ] 4.6 Connect sync triggers to application foreground, debounced local writes, manual refresh, foreground interval, and connectivity hints. Confirm reachability through health/sync rather than interface state alone.
+- [x] 4.6 Connect sync triggers to application foreground, debounced local writes, manual refresh, foreground interval, and connectivity hints. Confirm reachability through health/sync rather than interface state alone.
 - [ ] 4.7 Implement access-token refresh-once behavior and blocked-sync state without wiping local data.
 - [ ] 4.8 Build a deterministic two-device integration harness using independent local stores and a real Postgres database.
 

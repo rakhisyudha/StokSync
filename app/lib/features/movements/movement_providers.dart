@@ -4,6 +4,7 @@ import '../../core/identifiers/uuid_v7_generator.dart';
 import '../../core/identity/device_identity.dart';
 import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
+import '../../data/local/local_write_notifier.dart';
 
 /// Provides immutable stock-ledger mutations backed exclusively by local Drift.
 ///
@@ -16,5 +17,6 @@ final localStockMovementRepositoryProvider =
         database: ref.watch(stoksyncDatabaseProvider),
         identifierGenerator: UuidV7Generator(),
         deviceIdentity: DeviceIdentity.platform(),
+        localWriteNotifier: ref.watch(localWriteNotifierProvider),
       );
     });

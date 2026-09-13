@@ -110,7 +110,7 @@ void main() {
       );
       expect(
         find.text(
-          'Local status is stored on this device; no network request is made.',
+          'Status counts are local; sync checks reachability before sending work.',
         ),
         findsOneWidget,
       );

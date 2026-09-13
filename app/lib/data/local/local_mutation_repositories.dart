@@ -5,6 +5,7 @@ import 'package:sync_engine/sync_engine.dart';
 
 import '../../core/identifiers/uuid_v7_generator.dart';
 import '../../core/identity/device_identity.dart';
+import 'local_write_notifier.dart';
 import 'stoksync_database.dart';
 
 /// A mutable product form used to create or replace local product details.
@@ -305,17 +306,20 @@ final class LocalProductRepository {
     required DeviceIdentity deviceIdentity,
     DateTime Function()? clock,
     PendingOperationDao? pendingOperations,
+    LocalWriteNotifier? localWriteNotifier,
   }) : _database = database,
        _identifierGenerator = identifierGenerator,
        _deviceIdentity = deviceIdentity,
        _clock = clock ?? _utcNow,
-       _pendingOperations = pendingOperations ?? PendingOperationDao(database);
+       _pendingOperations = pendingOperations ?? PendingOperationDao(database),
+       _localWriteNotifier = localWriteNotifier;
 
   final StokSyncDatabase _database;
   final IdentifierGenerator _identifierGenerator;
   final DeviceIdentity _deviceIdentity;
   final DateTime Function() _clock;
   final PendingOperationDao _pendingOperations;
+  final LocalWriteNotifier? _localWriteNotifier;
 
   /// Inserts an active product, its zero-balance projection, and one
   /// `upsert_product` operation atomically.
@@ -326,7 +330,7 @@ final class LocalProductRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final now = _now();
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       await _database
           .into(_database.products)
           .insert(
@@ -369,6 +373,8 @@ final class LocalProductRepository {
         localSequence: localSequence,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   /// Replaces active product details and enqueues an optimistic update using
@@ -383,7 +389,7 @@ final class LocalProductRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final now = _now();
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       final product = await _requireActiveProduct(productId);
       await (_database.update(
         _database.products,
@@ -416,6 +422,8 @@ final class LocalProductRepository {
         localSequence: localSequence,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   /// Writes an audit-preserving product tombstone; historical movements and
@@ -426,7 +434,7 @@ final class LocalProductRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final now = _now();
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       final product = await _requireActiveProduct(productId);
       await (_database.update(
         _database.products,
@@ -453,6 +461,8 @@ final class LocalProductRepository {
         localSequence: localSequence,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   ProductDraft _normalizeProductDraft(ProductDraft draft) {
@@ -505,17 +515,20 @@ final class LocalStockMovementRepository {
     required DeviceIdentity deviceIdentity,
     DateTime Function()? clock,
     PendingOperationDao? pendingOperations,
+    LocalWriteNotifier? localWriteNotifier,
   }) : _database = database,
        _identifierGenerator = identifierGenerator,
        _deviceIdentity = deviceIdentity,
        _clock = clock ?? _utcNow,
-       _pendingOperations = pendingOperations ?? PendingOperationDao(database);
+       _pendingOperations = pendingOperations ?? PendingOperationDao(database),
+       _localWriteNotifier = localWriteNotifier;
 
   final StokSyncDatabase _database;
   final IdentifierGenerator _identifierGenerator;
   final DeviceIdentity _deviceIdentity;
   final DateTime Function() _clock;
   final PendingOperationDao _pendingOperations;
+  final LocalWriteNotifier? _localWriteNotifier;
 
   Future<MovementMutationResult> receive({
     required String productId,
@@ -584,7 +597,7 @@ final class LocalStockMovementRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final resolvedTiming = _resolveTiming(timing);
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       await _requireActiveProduct(productId);
       final currentBalance = await _currentBalance(productId);
       final delta = countedQuantity - currentBalance;
@@ -631,6 +644,8 @@ final class LocalStockMovementRepository {
         delta: delta,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   /// Appends an `adjust` movement whose delta exactly negates the referenced
@@ -646,7 +661,7 @@ final class LocalStockMovementRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final resolvedTiming = _resolveTiming(timing);
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       final original = await (_database.select(
         _database.stockMovements,
       )..where((row) => row.id.equals(originalMovementId))).getSingleOrNull();
@@ -698,6 +713,8 @@ final class LocalStockMovementRepository {
         delta: delta,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   Future<MovementMutationResult> _recordExplicit({
@@ -714,7 +731,7 @@ final class LocalStockMovementRepository {
     final deviceId = await _deviceIdentity.getDeviceId();
     final resolvedTiming = _resolveTiming(timing);
 
-    return _database.transaction(() async {
+    final result = await _database.transaction(() async {
       await _requireActiveProduct(productId);
       await _insertMovement(
         movementId: movementId,
@@ -758,6 +775,8 @@ final class LocalStockMovementRepository {
         delta: delta,
       );
     });
+    _localWriteNotifier?.notify();
+    return result;
   }
 
   Future<void> _insertMovement({

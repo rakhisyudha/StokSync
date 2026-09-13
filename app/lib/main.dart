@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'data/local/local_database.dart';
 import 'data/local/local_query_providers.dart';
 import 'features/products/product_pages.dart';
+import 'features/sync/sync_trigger_providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +27,7 @@ class StokSyncApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       ),
-      home: const ProductBrowsePage(),
+      home: const SyncTriggerHost(child: ProductBrowsePage()),
     );
   }
 }
