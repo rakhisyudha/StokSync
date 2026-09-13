@@ -1,0 +1,490 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "0.1 Create the repository layout: `app/`, `server/`, `docs/adr/`, and local-development configuration. Keep the existing `.kiro/specs/stoksync/` files as the authoritative plan.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295392441
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295401567
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295479665
+      }
+    ],
+    "0.2 Initialize the Flutter application and a separate pure-Dart `sync_engine` package. Add Riverpod, Drift/SQLite, secure storage, connectivity handling, and `mobile_scanner` using pinned compatible versions.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295392831
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295487994
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295853779
+      }
+    ],
+    "0.3 Initialize the Go module, Chi router, configuration loading, structured logging, health/readiness endpoints, and graceful shutdown using `net/http` conventions.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295392891
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295859763
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296049655
+      }
+    ],
+    "0.4 Add Docker Compose for a local PostgreSQL instance, environment templates without secrets, and a migration runner (`goose` or `golang-migrate`).": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295392950
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296055746
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296302801
+      }
+    ],
+    "0.5 Add client and server formatting, static analysis, test commands, and CI. Do not add Redis, Asynq, workers, WebSockets, or multi-tenancy.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295392996
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296308759
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296562069
+      }
+    ],
+    "0.6 Add initial ADRs for: local-first architecture, Drift over Hive/Isar, immutable stock ledger, Go/Chi/PostgreSQL, and no Redis/Asynq in v1.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393044
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296567947
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296692301
+      }
+    ],
+    "1.1 Define Drift tables and migrations for products, stock movements, materialized balances, pending operations, sync state, and conflicts.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393093
+      },
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789296698575
+      }
+    ],
+    "1.2 Implement local UUIDv7 generation and durable device identity.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393155
+      }
+    ],
+    "1.3 Implement repositories that atomically write domain changes, local balance projections, and pending operations in one SQLite transaction.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393197
+      }
+    ],
+    "1.4 Implement a rebuildable local balance projection from the ledger and test it against incremental updates.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393235
+      }
+    ],
+    "1.5 Build Riverpod providers over Drift `watch()` queries for active products, product details, movement history, low-stock products, and sync summary.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393279
+      }
+    ],
+    "1.6 Build product browse/search/detail/create/edit/soft-delete flows backed only by local data.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393318
+      }
+    ],
+    "1.7 Integrate `mobile_scanner`: permissions, allowed formats, duplicate-read debounce, matching-product navigation, and unknown-barcode product creation.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393356
+      }
+    ],
+    "1.8 Build receive, issue, adjustment, reversal, and stocktake entry flows with notes and validation.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393395
+      }
+    ],
+    "1.9 Add a local sync-status shell showing queued count, conflicts count, and last known status, even before remote sync exists.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393433
+      }
+    ],
+    "2.1 Create PostgreSQL migrations for users, devices, refresh tokens, products, stock movements, product balances, `change_log`, `sync_ops`, and `sync_seq_counter`.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393470
+      }
+    ],
+    "2.2 Add database constraints and indexes: non-zero deltas, allowed movement kinds, foreign keys, active-barcode partial uniqueness, product version, and `(device_id, op_id)` idempotency primary key.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393512
+      }
+    ],
+    "2.3 Implement `pgx` connection pooling and `sqlc` queries (or explicitly documented equivalent) for domain and synchronization transactions.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393548
+      }
+    ],
+    "2.4 Implement password hashing, login, device registration, access-token issuance, refresh-token rotation/revocation, and Chi authentication middleware.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393585
+      }
+    ],
+    "2.5 Implement canonical product and immutable movement transaction services. Maintain server `product_balances` transactionally and provide a projection rebuild verification command/test.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393626
+      }
+    ],
+    "2.6 Implement transaction-scoped change-log sequence allocation through `sync_seq_counter`; never rely on `BIGSERIAL` as the sync cursor.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393664
+      }
+    ],
+    "2.7 Implement `GET /v1/snapshot` using a consistent snapshot and return products, movements, tombstones, and cursor.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393703
+      }
+    ],
+    "2.8 Write API protocol documentation and a reproducible HTTP test collection/script covering login, refresh, snapshot, and health.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393740
+      }
+    ],
+    "3.1 Define versioned JSON DTOs for sync requests, operations, operation results, change entries, and responses. Enforce request limits and schema-version handling.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393781
+      }
+    ],
+    "3.2 Implement `POST /v1/sync` in Chi with authenticated user/device validation and per-operation transactions.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393820
+      }
+    ],
+    "3.3 Implement `add_movement`, `upsert_product`, and `delete_product` operations on the server. Persist an idempotency outcome and its response atomically with each operation.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393861
+      }
+    ],
+    "3.4 On duplicate `(device_id, op_id)`, return the originally stored operation response exactly and do not reapply domain logic.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393900
+      }
+    ],
+    "3.5 Implement the pure Dart transport interface, HTTP implementation, operation serialization, response decoding, and server-time clock-offset persistence.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393937
+      }
+    ],
+    "3.6 Implement a sync mutex, due FIFO operation selection, retry classification, exponential backoff with jitter, and interruption-safe pending-operation states.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295393980
+      }
+    ],
+    "3.7 Reconcile successful and rejected push results into Drift; remove applied queue items only in a transaction that persists their canonical consequence. Store terminal errors/conflicts.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394019
+      }
+    ],
+    "3.8 Add unit/integration tests for duplicate delivery, lost response, partial-batch success, server error retries, and retry persistence across restart.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394063
+      }
+    ],
+    "4.1 Implement server change-feed reads ordered by `seq > cursor`, bounded by `max_changes`, returning `next_cursor` and `has_more`.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394104
+      }
+    ],
+    "4.2 Implement snapshot bootstrap on the client: write all snapshot data, balances/projections, and initial cursor in one SQLite transaction.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394169
+      }
+    ],
+    "4.3 Implement idempotent remote upsert/tombstone application for products and movements.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394207
+      }
+    ],
+    "4.4 Advance the local cursor only in the same SQLite transaction as the complete applied change page.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394245
+      }
+    ],
+    "4.5 Complete the push-then-pull loop with pagination until `has_more` is false.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394286
+      }
+    ],
+    "4.6 Connect sync triggers to application foreground, debounced local writes, manual refresh, foreground interval, and connectivity hints. Confirm reachability through health/sync rather than interface state alone.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394325
+      }
+    ],
+    "4.7 Implement access-token refresh-once behavior and blocked-sync state without wiping local data.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394363
+      }
+    ],
+    "4.8 Build a deterministic two-device integration harness using independent local stores and a real Postgres database.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394409
+      }
+    ],
+    "5.1 Add canonical product version checks using `base_version` and return structured version-conflict responses with current server state.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394449
+      }
+    ],
+    "5.2 Implement a three-way field merge for disjoint product edits, producing an explicit merged follow-up operation using the current server version.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394488
+      }
+    ],
+    "5.3 Implement and test duplicate barcode conflict handling based on the active-barcode unique index.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394525
+      }
+    ],
+    "5.4 Implement and test delete-wins behavior for edit-versus-tombstone races.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394568
+      }
+    ],
+    "5.5 Implement stocktake processing that stores `counted_qty` and recomputes its delta against the canonical ledger in the server transaction.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394609
+      }
+    ],
+    "5.6 Document and implement deterministic treatment of concurrent stocktakes, including an informational or resolvable record for stale/displaced intent.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394644
+      }
+    ],
+    "5.7 Build the Flutter conflict list/detail/resolution flows showing reason, base/local/server payloads, and the explicit follow-up action.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394685
+      }
+    ],
+    "5.8 Implement the sync-status chip and detail screen showing state, pending count, conflicts, last successful sync, and error summary.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394723
+      }
+    ],
+    "5.9 Add automated scenarios for every row in the documented conflict matrix.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394763
+      }
+    ],
+    "6.1 Add Drift migration tests and server migration-upgrade tests from representative previous schemas.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394802
+      }
+    ],
+    "6.2 Expand the convergence harness with dropped requests/responses, duplicates, reordering, timeouts, retries, and random operation sequences; assert eventual convergence and ledger-derived balances.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394842
+      }
+    ],
+    "6.3 Add client/server structured logging and safe diagnostics, excluding credentials and tokens.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394881
+      }
+    ],
+    "6.4 Complete README documentation: local setup, architecture diagram, data model, protocol overview, test commands, known v1 limits, and two-device demonstration steps.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394919
+      }
+    ],
+    "6.5 Record ADRs for idempotency, cursor allocation, conflict behavior, stocktake policy, and foreground-first sync constraints.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394959
+      }
+    ],
+    "6.6 Manually validate the demo on two physical phones or emulators: scan, offline operations, restart persistence, convergence, and conflict resolution.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295394998
+      }
+    ],
+    "V2.1 Introduce multi-tenant ownership (`tenant_id`), tenant-scoped unique indexes, authorization, and PostgreSQL row-level security.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395040
+      }
+    ],
+    "V2.2 Add shared organizations, roles, invitations, and multi-user audit attribution.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395078
+      }
+    ],
+    "V2.3 Add a Postgres-backed worker queue for genuine asynchronous jobs using transactionally enqueued jobs and `FOR UPDATE SKIP LOCKED`.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395141
+      }
+    ],
+    "V2.4 Evaluate Redis and Asynq only after a demonstrated need for distributed rate limiting, caching, delayed jobs, or higher worker throughput.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395181
+      }
+    ],
+    "V2.5 Add FCM/APNs data-message nudges and opportunistic mobile background sync; retain foreground sync as the correctness baseline.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395218
+      }
+    ],
+    "V2.6 Add partial replication/sync rules only when catalog size or privacy requirements demand it.": [
+      {
+        "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
+        "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
+        "timestamp": 1789295395263
+      }
+    ]
+  }
+}

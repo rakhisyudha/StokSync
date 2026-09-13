@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Stop and summarize at milestone boundary",
+      "trigger": "PostTaskExec",
+      "action": {
+        "type": "agent",
+        "prompt": "A spec task was just marked complete. Open .kiro/specs/stoksync/tasks.md and check whether the task just completed is the LAST task listed before that milestone's \"Milestone validation\" line.\n\nIf it IS the last task of its milestone:\n1. Do not start any task from the next milestone in this run.\n2. Write a concise summary of every file created or modified, and every notable decision made, since the previous milestone checkpoint (use git status/diff if helpful to be accurate).\n3. Tell the user the milestone is complete and ready to commit/push to GitHub.\n4. Wait for the user's explicit go-ahead before continuing to the next milestone's tasks.\n\nIf it is NOT the last task of its milestone, continue normally without interrupting the user."
+      }
+    }
+  ]
+}
