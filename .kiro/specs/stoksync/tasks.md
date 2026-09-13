@@ -57,7 +57,7 @@
 - [x] 3.5 Implement the pure Dart transport interface, HTTP implementation, operation serialization, response decoding, and server-time clock-offset persistence.
 - [x] 3.6 Implement a sync mutex, due FIFO operation selection, retry classification, exponential backoff with jitter, and interruption-safe pending-operation states.
 - [x] 3.7 Reconcile successful and rejected push results into Drift; remove applied queue items only in a transaction that persists their canonical consequence. Store terminal errors/conflicts.
-- [-] 3.8 Add unit/integration tests for duplicate delivery, lost response, partial-batch success, server error retries, and retry persistence across restart.
+- [x] 3.8 Add unit/integration tests for duplicate delivery, lost response, partial-batch success, server error retries, and retry persistence across restart.
 
 **Milestone validation:** Intentionally lose a response after the server commits a movement. Retrying the same operation one or many times leaves exactly one canonical movement and returns the original outcome. A malformed operation cannot prevent valid operations in the same batch from completing.
 

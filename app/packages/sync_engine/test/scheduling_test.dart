@@ -247,6 +247,50 @@ void main() {
       },
     );
 
+    test(
+      'schedules retryable 5xx responses with durable retry metadata',
+      () async {
+        final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+        final operation = _pendingOperation(
+          opId: _operationId(1),
+          localSeq: 1,
+          nextAttemptAt: now,
+        );
+        final store = _MemoryPendingStore([operation]);
+        final engine = SyncEngine(
+          transport: _RecordingTransport(
+            error: const SyncHttpException(
+              statusCode: 503,
+              kind: SyncHttpErrorKind.server,
+            ),
+          ),
+          pendingOperations: store,
+          cursorStore: _MemoryCursorStore(0),
+          deviceId: _deviceId,
+          now: () => now,
+          backoff: SyncBackoffPolicy(
+            baseDelay: const Duration(seconds: 10),
+            maxDelay: const Duration(minutes: 5),
+            jitterRatio: 0,
+          ),
+        );
+
+        await expectLater(
+          engine.synchronize(),
+          throwsA(isA<SyncHttpException>()),
+        );
+
+        final updated = store.row(operation.opId);
+        expect(updated.status, PendingSyncOperationStatus.retrying);
+        expect(updated.attempts, 1);
+        expect(updated.nextAttemptAt, now.add(const Duration(seconds: 10)));
+        expect(
+          updated.lastError,
+          'SyncHttpException(status: 503, kind: server)',
+        );
+      },
+    );
+
     test('releases claimed rows for an authentication blocker', () async {
       final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
       final store = _MemoryPendingStore([
