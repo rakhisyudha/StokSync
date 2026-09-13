@@ -211,6 +211,137 @@ void main() {
     );
 
     test(
+      'pushes once, applies each page, and pulls with persisted cursors',
+      () async {
+        final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+        final cursorStore = _MemoryCursorStore(0);
+        final transport = _PagingTransport([
+          _pageResponse(now, sequence: 1, nextCursor: 1, hasMore: true),
+          _pageResponse(now, sequence: 2, nextCursor: 2, hasMore: true),
+          _pageResponse(now, nextCursor: 2),
+        ]);
+        final events = <String>[];
+        final operation = _pendingOperation(
+          opId: _operationId(1),
+          localSeq: 1,
+          nextAttemptAt: now,
+        );
+        final engine = SyncEngine(
+          transport: transport,
+          pendingOperations: _MemoryPendingStore([operation]),
+          cursorStore: cursorStore,
+          deviceId: _deviceId,
+          now: () => now,
+          onResponse: (response, operations) async {
+            events.add('apply:${response.nextCursor}:${operations.length}');
+            cursorStore.cursor = response.nextCursor;
+          },
+        );
+
+        final result = await engine.synchronize();
+
+        expect(result, isNotNull);
+        expect(transport.requests, hasLength(3));
+        expect(transport.requests.map((request) => request.cursor), [0, 1, 2]);
+        expect(transport.requests.map((request) => request.operations.length), [
+          1,
+          0,
+          0,
+        ]);
+        expect(events, ['apply:1:1', 'apply:2:0', 'apply:2:0']);
+        expect(cursorStore.cursor, 2);
+      },
+    );
+
+    test(
+      'runs a pull-only exchange and applies a final non-empty page',
+      () async {
+        final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+        final cursorStore = _MemoryCursorStore(4);
+        final transport = _PagingTransport([
+          _pageResponse(now, sequence: 5, nextCursor: 5),
+        ]);
+        final engine = SyncEngine(
+          transport: transport,
+          pendingOperations: _MemoryPendingStore(const []),
+          cursorStore: cursorStore,
+          deviceId: _deviceId,
+          now: () => now,
+          onResponse: (response, operations) async {
+            expect(operations, isEmpty);
+            cursorStore.cursor = response.nextCursor;
+          },
+        );
+
+        final result = await engine.synchronize();
+
+        expect(result, isNotNull);
+        expect(transport.requests, hasLength(1));
+        expect(transport.requests.single.cursor, 4);
+        expect(transport.requests.single.operations, isEmpty);
+        expect(cursorStore.cursor, 5);
+      },
+    );
+
+    test(
+      'rejects a non-progressing pagination page before local application',
+      () async {
+        final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+        final cursorStore = _MemoryCursorStore(7);
+        final transport = _PagingTransport([
+          _pageResponse(now, nextCursor: 7, hasMore: true),
+        ]);
+        var handlerCalled = false;
+        final engine = SyncEngine(
+          transport: transport,
+          pendingOperations: _MemoryPendingStore(const []),
+          cursorStore: cursorStore,
+          deviceId: _deviceId,
+          now: () => now,
+          onResponse: (_, _) async {
+            handlerCalled = true;
+          },
+        );
+
+        await expectLater(
+          engine.synchronize(),
+          throwsA(isA<SyncProtocolException>()),
+        );
+
+        expect(transport.requests, hasLength(1));
+        expect(handlerCalled, isFalse);
+        expect(cursorStore.cursor, 7);
+      },
+    );
+
+    test(
+      'rejects a page whose cursor does not match its last change',
+      () async {
+        final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+        final cursorStore = _MemoryCursorStore(0);
+        final transport = _PagingTransport([
+          _pageResponse(now, sequence: 8, nextCursor: 9),
+        ]);
+        final engine = SyncEngine(
+          transport: transport,
+          pendingOperations: _MemoryPendingStore(const []),
+          cursorStore: cursorStore,
+          deviceId: _deviceId,
+          now: () => now,
+          onResponse: (_, _) async {
+            fail('malformed page must not reach the local handler');
+          },
+        );
+
+        await expectLater(
+          engine.synchronize(),
+          throwsA(isA<SyncProtocolException>()),
+        );
+        expect(cursorStore.cursor, 0);
+      },
+    );
+
+    test(
       'schedules retryable failures with incremented attempts and jittered delay',
       () async {
         final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
@@ -380,6 +511,7 @@ void main() {
 }
 
 const _deviceId = '0192f200-0000-7000-8000-000000000001';
+const _productId = '0192e1aa-0000-7000-8000-000000000001';
 
 String _operationId(int index) {
   return '0192f3a$index-0000-7000-8000-000000000001';
@@ -416,6 +548,50 @@ final class _MemoryCursorStore implements SyncCursorStore {
 
   @override
   Future<int> readCursor() async => cursor;
+}
+
+SyncResponse _pageResponse(
+  DateTime serverTime, {
+  int? sequence,
+  required int nextCursor,
+  bool hasMore = false,
+}) {
+  final changes = sequence == null
+      ? const <SyncChangeEntry>[]
+      : <SyncChangeEntry>[
+          SyncChangeEntry(
+            seq: sequence,
+            entity: 'product',
+            operation: 'upsert',
+            data: const <String, Object?>{'id': _productId},
+            createdAt: serverTime,
+          ),
+        ];
+  return SyncResponse(
+    results: const [],
+    changes: changes,
+    nextCursor: nextCursor,
+    hasMore: hasMore,
+    serverTime: serverTime,
+  );
+}
+
+final class _PagingTransport implements SyncTransport {
+  _PagingTransport(Iterable<SyncResponse> responses)
+    : _responses = responses.toList(growable: false);
+
+  final List<SyncResponse> _responses;
+  final List<SyncRequest> requests = [];
+  var _responseIndex = 0;
+
+  @override
+  Future<SyncResponse> synchronize(SyncRequest request) async {
+    requests.add(request);
+    if (_responseIndex >= _responses.length) {
+      throw StateError('test transport received an unexpected request');
+    }
+    return _responses[_responseIndex++];
+  }
 }
 
 final class _RecordingTransport implements SyncTransport {

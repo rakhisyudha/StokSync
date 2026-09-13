@@ -158,13 +158,18 @@ abstract interface class SyncCursorStore {
   Future<int> readCursor();
 }
 
+/// Applies one validated response page and persists its cursor before
+/// returning. [operations] is non-empty only for the initial push response;
+/// pagination responses always pass an empty list.
 typedef SyncResponseHandler =
     Future<void> Function(
       SyncResponse response,
       List<PendingSyncOperation> operations,
     );
 
-/// Result of one serialized push exchange.
+/// Result of one serialized push-then-pull run. [response] is the initial
+/// push exchange response; pull-only pagination responses are delivered to the
+/// response handler in order but are not duplicated here.
 final class SyncCycleResult {
   SyncCycleResult({
     required this.response,
@@ -208,8 +213,8 @@ final class SyncMutex {
   }
 }
 
-/// Coordinates one bounded push exchange while leaving response
-/// reconciliation to the next task's local-store implementation.
+/// Coordinates one serialized push-then-pull run. The local-store callback
+/// reconciles operation outcomes and applies each complete change page.
 final class SyncEngine {
   SyncEngine({
     required SyncTransport transport,
@@ -259,9 +264,13 @@ final class SyncEngine {
 
   SyncMutex get mutex => _mutex;
 
-  /// Executes at most one due FIFO batch. A null result means the queue is
-  /// empty at the time of selection; pull-only synchronization is intentionally
-  /// left to the later incremental pull task.
+  /// Executes one serialized push-then-pull run.
+  ///
+  /// The first exchange contains the bounded FIFO operation batch. Every
+  /// subsequent exchange contains no operations and uses the cursor persisted
+  /// by the response handler for the complete page just applied. A run always
+  /// performs the initial exchange, even when the local queue is empty, so a
+  /// device can pull remote changes.
   Future<SyncCycleResult?> synchronize() {
     return _mutex.runExclusive(_synchronizeOnce);
   }
@@ -273,9 +282,6 @@ final class SyncEngine {
       now: now,
       limit: maxOperations,
     );
-    if (operations.isEmpty) {
-      return null;
-    }
 
     final syncOperations = <SyncOperation>[];
     try {
@@ -295,7 +301,7 @@ final class SyncEngine {
       Error.throwWithStackTrace(error, stackTrace);
     }
 
-    final request = SyncRequest(
+    final initialRequest = SyncRequest(
       deviceId: _deviceId,
       cursor: cursor,
       maxChanges: maxChanges,
@@ -303,14 +309,75 @@ final class SyncEngine {
       operations: syncOperations,
     );
 
-    final SyncResponse response;
+    final SyncResponse initialResponse;
     try {
-      response = await _transport.synchronize(request);
+      initialResponse = await _transport.synchronize(initialRequest);
     } catch (error, stackTrace) {
       await _bestEffortHandleFailure(operations, error, now);
       Error.throwWithStackTrace(error, stackTrace);
     }
 
+    try {
+      _validatePaginationPage(initialResponse, cursor);
+    } catch (error, stackTrace) {
+      // The server response was received, but the operation outcomes could
+      // not safely be reconciled. Retain them through the same terminal
+      // failure path used for malformed transport responses.
+      await _bestEffortHandleFailure(operations, error, now);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+
+    var currentCursor = await _applyPageAndReadCursor(
+      initialResponse,
+      operations,
+      requestedCursor: cursor,
+    );
+    var response = initialResponse;
+
+    while (response.hasMore) {
+      final request = SyncRequest(
+        deviceId: _deviceId,
+        cursor: currentCursor,
+        maxChanges: maxChanges,
+        clientTime: _now().toUtc(),
+        operations: const <SyncOperation>[],
+      );
+
+      final SyncResponse nextResponse;
+      try {
+        nextResponse = await _transport.synchronize(request);
+      } catch (error, stackTrace) {
+        // The initial operation response has already reached the handler. No
+        // claimed operations are associated with this pull-only exchange.
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+
+      try {
+        _validatePaginationPage(
+          nextResponse,
+          currentCursor,
+          requireEmptyResults: true,
+        );
+      } catch (error, stackTrace) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+
+      currentCursor = await _applyPageAndReadCursor(
+        nextResponse,
+        const <PendingSyncOperation>[],
+        requestedCursor: currentCursor,
+      );
+      response = nextResponse;
+    }
+
+    return SyncCycleResult(response: initialResponse, operations: operations);
+  }
+
+  Future<int> _applyPageAndReadCursor(
+    SyncResponse response,
+    List<PendingSyncOperation> operations, {
+    required int requestedCursor,
+  }) async {
     final handler = _onResponse;
     if (handler != null) {
       try {
@@ -324,7 +391,85 @@ final class SyncEngine {
       }
     }
 
-    return SyncCycleResult(response: response, operations: operations);
+    try {
+      final persistedCursor = await _cursorStore.readCursor();
+      if (persistedCursor != response.nextCursor) {
+        throw _invalidPagination(
+          'next_cursor',
+          'was not persisted after applying the complete change page',
+        );
+      }
+      if (persistedCursor < requestedCursor) {
+        throw _invalidPagination(
+          'next_cursor',
+          'must not move the local cursor backwards',
+        );
+      }
+      return persistedCursor;
+    } catch (error, stackTrace) {
+      await _bestEffortRelease(operations);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  void _validatePaginationPage(
+    SyncResponse response,
+    int requestedCursor, {
+    bool requireEmptyResults = false,
+  }) {
+    // Validate the complete response before invoking the local page handler so
+    // malformed pages cannot partially advance the replica.
+    response.toJson();
+    if (requireEmptyResults && response.results.isNotEmpty) {
+      throw _invalidPagination(
+        'results',
+        'must be empty for a pull-only pagination request',
+      );
+    }
+    if (response.nextCursor < requestedCursor) {
+      throw _invalidPagination(
+        'next_cursor',
+        'must not move the local cursor backwards',
+      );
+    }
+
+    final changes = response.changes;
+    if (changes.isEmpty) {
+      if (response.nextCursor != requestedCursor) {
+        throw _invalidPagination(
+          'next_cursor',
+          'must preserve the request cursor when a page is empty',
+        );
+      }
+      if (response.hasMore) {
+        throw _invalidPagination(
+          'has_more',
+          'cannot be true for an empty change page',
+        );
+      }
+      return;
+    }
+
+    final lastSequence = changes.last.seq;
+    if (response.nextCursor != lastSequence) {
+      throw _invalidPagination(
+        'next_cursor',
+        'must equal the last change sequence in the page',
+      );
+    }
+    if (response.nextCursor > requestedCursor &&
+        changes.first.seq <= requestedCursor) {
+      throw _invalidPagination(
+        'changes',
+        'contains changes at or before the request cursor while advancing',
+      );
+    }
+    if (response.hasMore && response.nextCursor <= requestedCursor) {
+      throw _invalidPagination(
+        'next_cursor',
+        'must advance when has_more is true',
+      );
+    }
   }
 
   Future<void> _bestEffortHandleFailure(
@@ -373,6 +518,14 @@ final class SyncEngine {
       // Startup recovery is the final safety net if this write is interrupted.
     }
   }
+}
+
+SyncProtocolException _invalidPagination(String field, String message) {
+  return SyncProtocolException(
+    SyncProtocolErrorKind.invalidResponse,
+    message,
+    field: field,
+  );
 }
 
 String _safeErrorSummary(Object error) {

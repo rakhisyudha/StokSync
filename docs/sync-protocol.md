@@ -147,6 +147,19 @@ protocol failures remain retained as `blocked` rows with a safe error summary.
 Removing applied rows and creating canonical conflicts are response
 reconciliation responsibilities, not scheduler responsibilities.
 
+### Push-then-pull pagination
+
+One client sync run always sends its due FIFO operation batch first. The client
+reconciles that response, applies its complete change page transactionally, and
+then repeats the same authenticated `POST /v1/sync` exchange with an empty
+`ops` array while `has_more` is true. Each follow-up request reads the cursor
+persisted by the previous page application rather than trusting an in-memory
+response value, so a page cannot be skipped after a crash. A follow-up must
+advance the cursor and return no operation results; an empty page must preserve
+the request cursor and terminate pagination. Malformed, backwards, or
+non-advancing pages stop the run before local application, leaving the durable
+cursor at the last atomically applied page.
+
 ### Authentication requests and sessions
 
 `register` and `login` accept the same JSON shape:
