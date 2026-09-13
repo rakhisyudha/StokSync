@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/stoksync/stoksync/server/internal/db"
 	"github.com/stoksync/stoksync/server/internal/httpx"
 	"github.com/stoksync/stoksync/server/internal/platform/config"
 	"github.com/stoksync/stoksync/server/internal/platform/logging"
@@ -23,10 +24,25 @@ func main() {
 	}
 
 	logger := logging.New(cfg.Environment)
-	handler := httpx.NewRouter(logger, func(context.Context) error {
-		// Dependencies are added to this check as they are introduced.
-		return nil
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := db.Open(ctx, db.PoolConfig{
+		URL:               cfg.Database.DatabaseURL,
+		MaxConns:          cfg.Database.MaxConns,
+		MinConns:          cfg.Database.MinConns,
+		MaxConnLifetime:   cfg.Database.MaxConnLifetime,
+		MaxConnIdleTime:   cfg.Database.MaxConnIdleTime,
+		HealthCheckPeriod: cfg.Database.HealthCheckPeriod,
 	})
+	if err != nil {
+		logger.Error("invalid database configuration", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	handler := httpx.NewRouter(logger, pool.Ping)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -34,9 +50,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if err := platformserver.Run(ctx, httpServer, cfg.ShutdownTimeout, logger); err != nil {
 		logger.Error("api server stopped unexpectedly", "error", err)

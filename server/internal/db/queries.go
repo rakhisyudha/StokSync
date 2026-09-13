@@ -1,0 +1,646 @@
+package db
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// The SQL below is intentionally kept beside its typed methods. This is the
+// repository's documented sqlc-equivalent: every statement is static and
+// parameterized, and every result is mapped by a typed scan function. Keeping
+// the query constants in source control makes ownership predicates and
+// transaction-sensitive statements reviewable without a code generator.
+const (
+	insertProductSQL = `
+INSERT INTO products (
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    updated_by_device_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at`
+
+	getProductSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE user_id = $1 AND id = $2`
+
+	listProductsSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE user_id = $1 AND ($2::boolean OR deleted_at IS NULL)
+ORDER BY updated_at DESC, id`
+
+	updateProductSQL = `
+UPDATE products
+SET barcode = $3,
+    sku = $4,
+    name = $5,
+    description = $6,
+    unit = $7,
+    category = $8,
+    min_stock = $9,
+    version = version + 1,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by_device_id = $10
+WHERE user_id = $1 AND id = $2 AND version = $11 AND deleted_at IS NULL
+RETURNING
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at`
+
+	softDeleteProductSQL = `
+UPDATE products
+SET deleted_at = CURRENT_TIMESTAMP,
+    version = version + 1,
+    updated_at = CURRENT_TIMESTAMP,
+    updated_by_device_id = $4
+WHERE user_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL
+RETURNING
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at`
+
+	insertStockMovementSQL = `
+INSERT INTO stock_movements (
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id
+)
+SELECT
+    $1, p.user_id, p.id, $4, $5, $6, $7, $8, $9, $10, $11, $12
+FROM products AS p
+WHERE p.user_id = $2 AND p.id = $3 AND p.deleted_at IS NULL
+RETURNING
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at`
+
+	getStockMovementSQL = `
+SELECT
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
+FROM stock_movements
+WHERE user_id = $1 AND id = $2`
+
+	listStockMovementsSQL = `
+SELECT
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
+FROM stock_movements
+WHERE user_id = $1 AND product_id = $2
+ORDER BY occurred_at ASC, id`
+
+	incrementProductBalanceSQL = `
+INSERT INTO product_balances (product_id, qty, last_movement_at)
+SELECT p.id, $3, $4
+FROM products AS p
+WHERE p.user_id = $1 AND p.id = $2
+ON CONFLICT (product_id) DO UPDATE
+SET qty = product_balances.qty + EXCLUDED.qty,
+    last_movement_at = CASE
+        WHEN product_balances.last_movement_at IS NULL
+          OR EXCLUDED.last_movement_at > product_balances.last_movement_at
+        THEN EXCLUDED.last_movement_at
+        ELSE product_balances.last_movement_at
+    END,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING product_id, qty, last_movement_at, updated_at`
+
+	upsertProductBalanceSQL = `
+INSERT INTO product_balances (product_id, qty, last_movement_at)
+SELECT p.id, $3, $4
+FROM products AS p
+WHERE p.user_id = $1 AND p.id = $2
+ON CONFLICT (product_id) DO UPDATE
+SET qty = EXCLUDED.qty,
+    last_movement_at = EXCLUDED.last_movement_at,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING product_id, qty, last_movement_at, updated_at`
+
+	getProductBalanceSQL = `
+SELECT pb.product_id, pb.qty, pb.last_movement_at, pb.updated_at
+FROM product_balances AS pb
+JOIN products AS p ON p.id = pb.product_id AND p.user_id = $1
+WHERE pb.product_id = $2`
+
+	allocateChangeSequenceSQL = `
+UPDATE sync_seq_counter
+SET last_seq = last_seq + 1
+WHERE id = 1
+RETURNING last_seq`
+
+	currentChangeSequenceSQL = `
+SELECT last_seq
+FROM sync_seq_counter
+WHERE id = 1`
+
+	insertChangeLogSQL = `
+INSERT INTO change_log (
+    seq, user_id, entity, entity_id, op, payload, origin_device_id
+)
+SELECT $1, $2, $3, $4, $5, $6, $7
+WHERE $7::uuid IS NULL
+   OR EXISTS (
+       SELECT 1 FROM devices
+       WHERE id = $7 AND user_id = $2
+   )
+RETURNING seq, user_id, entity, entity_id, op, payload, origin_device_id, created_at`
+
+	listChangeLogSQL = `
+SELECT seq, user_id, entity, entity_id, op, payload, origin_device_id, created_at
+FROM change_log
+WHERE user_id = $1 AND seq > $2
+ORDER BY seq ASC
+LIMIT $3`
+
+	getSyncOperationSQL = `
+SELECT device_id, op_id, user_id, status, reason, response, received_at, completed_at
+FROM sync_ops
+WHERE user_id = $1 AND device_id = $2 AND op_id = $3`
+
+	tryInsertSyncOperationSQL = `
+INSERT INTO sync_ops (
+    device_id, op_id, user_id, status, reason, response, received_at, completed_at
+)
+SELECT $2, $3, $1, $4, $5, $6, CURRENT_TIMESTAMP, $7
+FROM devices
+WHERE id = $2 AND user_id = $1
+ON CONFLICT (device_id, op_id) DO NOTHING
+RETURNING device_id, op_id, user_id, status, reason, response, received_at, completed_at`
+)
+
+// Queries is the typed query/data-access object. It can be bound to a pool for
+// reads or to a transaction returned by WithTx for atomic mutations.
+type Queries struct {
+	db DBTX
+}
+
+// NewQueries binds the centralized SQL statements to a pool or transaction.
+func NewQueries(db DBTX) *Queries {
+	return &Queries{db: db}
+}
+
+// DB exposes the underlying narrow executor for composition by future service
+// packages without exposing a concrete pool dependency.
+func (q *Queries) DB() DBTX {
+	if q == nil {
+		return nil
+	}
+	return q.db
+}
+
+// InsertProduct inserts a canonical product and returns server-managed fields.
+func (q *Queries) InsertProduct(ctx context.Context, params CreateProductParams) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, insertProductSQL,
+		uuidArg(params.ID),
+		uuidArg(params.UserID),
+		optionalStringArg(params.Barcode),
+		optionalStringArg(params.SKU),
+		params.Name,
+		optionalStringArg(params.Description),
+		params.Unit,
+		optionalStringArg(params.Category),
+		optionalInt32Arg(params.MinStock),
+		uuidArg(params.UpdatedByDeviceID),
+	))
+}
+
+// GetProduct returns a product only when it belongs to userID.
+func (q *Queries) GetProduct(ctx context.Context, userID, productID uuid.UUID) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, getProductSQL, uuidArg(userID), uuidArg(productID)))
+}
+
+// ListProducts returns all products for a user when includeDeleted is true;
+// otherwise it returns only active catalog rows.
+func (q *Queries) ListProducts(ctx context.Context, userID uuid.UUID, includeDeleted bool) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listProductsSQL, uuidArg(userID), includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	products := make([]Product, 0)
+	for rows.Next() {
+		product, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		products = append(products, product)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+// UpdateProduct performs a full version-checked edit. pgx.ErrNoRows means the
+// product is missing, deleted, not owned by the caller, or has a stale version.
+func (q *Queries) UpdateProduct(ctx context.Context, params UpdateProductParams) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, updateProductSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.ID),
+		optionalStringArg(params.Barcode),
+		optionalStringArg(params.SKU),
+		params.Name,
+		optionalStringArg(params.Description),
+		params.Unit,
+		optionalStringArg(params.Category),
+		optionalInt32Arg(params.MinStock),
+		uuidArg(params.UpdatedByDeviceID),
+		params.BaseVersion,
+	))
+}
+
+// SoftDeleteProduct creates a product tombstone with a version check. It never
+// removes the row or its historical movements.
+func (q *Queries) SoftDeleteProduct(ctx context.Context, params SoftDeleteProductParams) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, softDeleteProductSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.ID),
+		params.BaseVersion,
+		uuidArg(params.UpdatedByDeviceID),
+	))
+}
+
+// InsertStockMovement appends one immutable movement for an active product
+// owned by UserID. There is deliberately no update/delete counterpart.
+func (q *Queries) InsertStockMovement(ctx context.Context, params CreateStockMovementParams) (StockMovement, error) {
+	return scanStockMovement(q.db.QueryRow(ctx, insertStockMovementSQL,
+		uuidArg(params.ID),
+		uuidArg(params.UserID),
+		uuidArg(params.ProductID),
+		params.Delta,
+		params.Kind,
+		optionalStringArg(params.Note),
+		params.OccurredAt,
+		params.RawOccurredAt,
+		params.ClockOffsetMs,
+		optionalInt32Arg(params.CountedQty),
+		optionalUUIDArg(params.ReversesID),
+		uuidArg(params.DeviceID),
+	))
+}
+
+// GetStockMovement returns a ledger row only from the requested user's scope.
+func (q *Queries) GetStockMovement(ctx context.Context, userID, movementID uuid.UUID) (StockMovement, error) {
+	return scanStockMovement(q.db.QueryRow(ctx, getStockMovementSQL, uuidArg(userID), uuidArg(movementID)))
+}
+
+// ListStockMovements returns immutable ledger history in occurrence order.
+func (q *Queries) ListStockMovements(ctx context.Context, userID, productID uuid.UUID) ([]StockMovement, error) {
+	rows, err := q.db.Query(ctx, listStockMovementsSQL, uuidArg(userID), uuidArg(productID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	movements := make([]StockMovement, 0)
+	for rows.Next() {
+		movement, err := scanStockMovement(rows)
+		if err != nil {
+			return nil, err
+		}
+		movements = append(movements, movement)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return movements, nil
+}
+
+// IncrementProductBalance updates the rebuildable projection by one movement
+// delta. Call it in the same transaction as InsertStockMovement.
+func (q *Queries) IncrementProductBalance(ctx context.Context, params IncrementProductBalanceParams) (ProductBalance, error) {
+	return scanProductBalance(q.db.QueryRow(ctx, incrementProductBalanceSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.ProductID),
+		params.Delta,
+		params.OccurredAt,
+	))
+}
+
+// UpsertProductBalance sets a projection value for a user-owned product. It is
+// intended for projection rebuilds and bootstrap, not as a replacement for
+// ledger writes.
+func (q *Queries) UpsertProductBalance(ctx context.Context, params UpsertProductBalanceParams) (ProductBalance, error) {
+	return scanProductBalance(q.db.QueryRow(ctx, upsertProductBalanceSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.ProductID),
+		params.Qty,
+		optionalTimeArg(params.LastMovementAt),
+	))
+}
+
+// GetProductBalance returns the projection only when the product belongs to
+// the requested user.
+func (q *Queries) GetProductBalance(ctx context.Context, userID, productID uuid.UUID) (ProductBalance, error) {
+	return scanProductBalance(q.db.QueryRow(ctx, getProductBalanceSQL, uuidArg(userID), uuidArg(productID)))
+}
+
+// AllocateChangeSequence increments the transaction-scoped allocator row. It
+// must be called in the same transaction as the domain/change-log insert.
+func (q *Queries) AllocateChangeSequence(ctx context.Context) (int64, error) {
+	var seq int64
+	if err := q.db.QueryRow(ctx, allocateChangeSequenceSQL).Scan(&seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+// CurrentChangeSequence reads the allocator high-water mark.
+func (q *Queries) CurrentChangeSequence(ctx context.Context) (int64, error) {
+	var seq int64
+	if err := q.db.QueryRow(ctx, currentChangeSequenceSQL).Scan(&seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+// InsertChangeLog records a replication event with an ownership check for the
+// optional originating device.
+func (q *Queries) InsertChangeLog(ctx context.Context, params InsertChangeLogParams) (ChangeLogEntry, error) {
+	return scanChangeLogEntry(q.db.QueryRow(ctx, insertChangeLogSQL,
+		params.Seq,
+		uuidArg(params.UserID),
+		params.Entity,
+		uuidArg(params.EntityID),
+		params.Op,
+		params.Payload,
+		optionalUUIDArg(params.OriginDeviceID),
+	))
+}
+
+// ListChangeLog returns changes strictly after AfterSeq in ascending cursor
+// order and no more than MaxChanges rows.
+func (q *Queries) ListChangeLog(ctx context.Context, params ListChangeLogParams) ([]ChangeLogEntry, error) {
+	if params.MaxChanges <= 0 {
+		return nil, fmt.Errorf("max changes must be greater than zero")
+	}
+	rows, err := q.db.Query(ctx, listChangeLogSQL,
+		uuidArg(params.UserID), params.AfterSeq, params.MaxChanges)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	changes := make([]ChangeLogEntry, 0)
+	for rows.Next() {
+		change, err := scanChangeLogEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, change)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
+// GetSyncOperation returns the canonical idempotency outcome in the user's
+// device scope.
+func (q *Queries) GetSyncOperation(ctx context.Context, userID, deviceID, opID uuid.UUID) (SyncOperation, error) {
+	return scanSyncOperation(q.db.QueryRow(ctx, getSyncOperationSQL,
+		uuidArg(userID), uuidArg(deviceID), uuidArg(opID)))
+}
+
+// TryInsertSyncOperation atomically records an operation outcome. inserted is
+// false when the composite (device_id, op_id) already exists; callers can then
+// use GetSyncOperation to replay the stored response without reapplying domain
+// logic.
+func (q *Queries) TryInsertSyncOperation(ctx context.Context, params InsertSyncOperationParams) (operation SyncOperation, inserted bool, err error) {
+	row := q.db.QueryRow(ctx, tryInsertSyncOperationSQL,
+		uuidArg(params.UserID),
+		uuidArg(params.DeviceID),
+		uuidArg(params.OpID),
+		params.Status,
+		optionalStringArg(params.Reason),
+		params.Response,
+		optionalTimeArg(params.CompletedAt),
+	)
+
+	operation, err = scanSyncOperation(row)
+	if err == pgx.ErrNoRows {
+		return SyncOperation{}, false, nil
+	}
+	if err != nil {
+		return SyncOperation{}, false, err
+	}
+	return operation, true, nil
+}
+
+func scanProduct(row pgx.Row) (Product, error) {
+	var (
+		id, userID, updatedByDeviceID       pgtype.UUID
+		barcode, sku, description, category pgtype.Text
+		minStock                            pgtype.Int4
+		name, unit                          string
+		version                             int64
+		updatedAt, createdAt                time.Time
+		deletedAt                           pgtype.Timestamptz
+	)
+	if err := row.Scan(
+		&id, &userID, &barcode, &sku, &name, &description, &unit,
+		&category, &minStock, &version, &updatedAt, &updatedByDeviceID,
+		&deletedAt, &createdAt,
+	); err != nil {
+		return Product{}, err
+	}
+	return Product{
+		ID:                uuidFromPG(id),
+		UserID:            uuidFromPG(userID),
+		Barcode:           stringFromPG(barcode),
+		SKU:               stringFromPG(sku),
+		Name:              name,
+		Description:       stringFromPG(description),
+		Unit:              unit,
+		Category:          stringFromPG(category),
+		MinStock:          int32FromPG(minStock),
+		Version:           version,
+		UpdatedAt:         updatedAt,
+		UpdatedByDeviceID: uuidFromPG(updatedByDeviceID),
+		DeletedAt:         timeFromPG(deletedAt),
+		CreatedAt:         createdAt,
+	}, nil
+}
+
+func scanStockMovement(row pgx.Row) (StockMovement, error) {
+	var (
+		id, userID, productID, reversesID, deviceID pgtype.UUID
+		note                                        pgtype.Text
+		countedQty                                  pgtype.Int4
+		delta                                       int32
+		kind                                        string
+		occurredAt, rawOccurredAt, serverCreatedAt  time.Time
+		clockOffsetMs                               int64
+	)
+	if err := row.Scan(
+		&id, &userID, &productID, &delta, &kind, &note, &occurredAt,
+		&rawOccurredAt, &clockOffsetMs, &countedQty, &reversesID, &deviceID,
+		&serverCreatedAt,
+	); err != nil {
+		return StockMovement{}, err
+	}
+	return StockMovement{
+		ID:              uuidFromPG(id),
+		UserID:          uuidFromPG(userID),
+		ProductID:       uuidFromPG(productID),
+		Delta:           delta,
+		Kind:            kind,
+		Note:            stringFromPG(note),
+		OccurredAt:      occurredAt,
+		RawOccurredAt:   rawOccurredAt,
+		ClockOffsetMs:   clockOffsetMs,
+		CountedQty:      int32FromPG(countedQty),
+		ReversesID:      uuidPointerFromPG(reversesID),
+		DeviceID:        uuidFromPG(deviceID),
+		ServerCreatedAt: serverCreatedAt,
+	}, nil
+}
+
+func scanProductBalance(row pgx.Row) (ProductBalance, error) {
+	var productID pgtype.UUID
+	var qty int64
+	var lastMovementAt pgtype.Timestamptz
+	var updatedAt time.Time
+	if err := row.Scan(&productID, &qty, &lastMovementAt, &updatedAt); err != nil {
+		return ProductBalance{}, err
+	}
+	return ProductBalance{
+		ProductID:      uuidFromPG(productID),
+		Qty:            qty,
+		LastMovementAt: timeFromPG(lastMovementAt),
+		UpdatedAt:      updatedAt,
+	}, nil
+}
+
+func scanChangeLogEntry(row pgx.Row) (ChangeLogEntry, error) {
+	var seq int64
+	var userID, entityID, originDeviceID pgtype.UUID
+	var entity, op string
+	var payload []byte
+	var createdAt time.Time
+	if err := row.Scan(
+		&seq, &userID, &entity, &entityID, &op, &payload, &originDeviceID,
+		&createdAt,
+	); err != nil {
+		return ChangeLogEntry{}, err
+	}
+	return ChangeLogEntry{
+		Seq:            seq,
+		UserID:         uuidFromPG(userID),
+		Entity:         entity,
+		EntityID:       uuidFromPG(entityID),
+		Op:             op,
+		Payload:        append([]byte(nil), payload...),
+		OriginDeviceID: uuidPointerFromPG(originDeviceID),
+		CreatedAt:      createdAt,
+	}, nil
+}
+
+func scanSyncOperation(row pgx.Row) (SyncOperation, error) {
+	var deviceID, opID, userID pgtype.UUID
+	var status string
+	var reason pgtype.Text
+	var response []byte
+	var receivedAt time.Time
+	var completedAt pgtype.Timestamptz
+	if err := row.Scan(
+		&deviceID, &opID, &userID, &status, &reason, &response, &receivedAt,
+		&completedAt,
+	); err != nil {
+		return SyncOperation{}, err
+	}
+	return SyncOperation{
+		DeviceID:    uuidFromPG(deviceID),
+		OpID:        uuidFromPG(opID),
+		UserID:      uuidFromPG(userID),
+		Status:      status,
+		Reason:      stringFromPG(reason),
+		Response:    append([]byte(nil), response...),
+		ReceivedAt:  receivedAt,
+		CompletedAt: timeFromPG(completedAt),
+	}, nil
+}
+
+func uuidArg(value uuid.UUID) pgtype.UUID {
+	return pgtype.UUID{Bytes: value, Valid: true}
+}
+
+func optionalUUIDArg(value *uuid.UUID) any {
+	if value == nil {
+		return nil
+	}
+	return uuidArg(*value)
+}
+
+func optionalStringArg(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func optionalInt32Arg(value *int32) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func optionalTimeArg(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func uuidFromPG(value pgtype.UUID) uuid.UUID {
+	return uuid.UUID(value.Bytes)
+}
+
+func uuidPointerFromPG(value pgtype.UUID) *uuid.UUID {
+	if !value.Valid {
+		return nil
+	}
+	result := uuidFromPG(value)
+	return &result
+}
+
+func stringFromPG(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	result := value.String
+	return &result
+}
+
+func stringFromPGValue(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func int32FromPG(value pgtype.Int4) *int32 {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Int32
+	return &result
+}
+
+func timeFromPG(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Time
+	return &result
+}
