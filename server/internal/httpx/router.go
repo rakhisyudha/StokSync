@@ -24,17 +24,25 @@ func NewRouter(logger *slog.Logger, readiness ReadinessCheck, authRoutes ...http
 	if len(authRoutes) > 0 {
 		authRoute = authRoutes[0]
 	}
-	return newRouter(logger, readiness, authRoute, nil)
+	return newRouter(logger, readiness, authRoute, nil, nil)
 }
 
 // NewRouterWithSnapshot composes the authenticated snapshot mount alongside
 // the existing auth routes. Keeping the composition here avoids coupling the
 // transport package to the snapshot service implementation.
 func NewRouterWithSnapshot(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute http.Handler) http.Handler {
-	return newRouter(logger, readiness, authRoute, snapshotRoute)
+	return newRouter(logger, readiness, authRoute, snapshotRoute, nil)
 }
 
-func newRouter(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute http.Handler) http.Handler {
+// NewRouterWithSnapshotAndSync composes the authenticated snapshot and sync
+// mounts alongside the existing auth routes. The explicit constructor keeps
+// the earlier router signatures source-compatible while the API gains the
+// Task 3.2 synchronization boundary.
+func NewRouterWithSnapshotAndSync(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute, syncRoute http.Handler) http.Handler {
+	return newRouter(logger, readiness, authRoute, snapshotRoute, syncRoute)
+}
+
+func newRouter(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapshotRoute, syncRoute http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -52,6 +60,9 @@ func newRouter(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapsho
 	}
 	if snapshotRoute != nil {
 		router.Mount("/v1/snapshot", snapshotRoute)
+	}
+	if syncRoute != nil {
+		router.Mount("/v1/sync", syncRoute)
 	}
 
 	router.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) {

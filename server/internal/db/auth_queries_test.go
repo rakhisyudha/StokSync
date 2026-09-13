@@ -58,3 +58,29 @@ func TestRefreshTokenQueriesLockAndPersistOnlyDigest(t *testing.T) {
 		t.Error("refresh lookup does not lock the row for rotation")
 	}
 }
+
+func TestGetDeviceQueryScopesLookupToAccount(t *testing.T) {
+	t.Parallel()
+
+	deviceID := uuid.New()
+	userID := uuid.New()
+	now := time.Now().UTC()
+	fake := &fakeQueryDB{row: staticRow{values: []any{
+		uuidArg(deviceID), uuidArg(userID), "Phone", "android",
+		pgtype.Timestamptz{Time: now, Valid: true}, int64(12),
+		pgtype.Timestamptz{Time: now, Valid: true},
+	}}}
+
+	device, err := NewQueries(fake).GetDevice(context.Background(), userID, deviceID)
+	if err != nil {
+		t.Fatalf("GetDevice() error = %v", err)
+	}
+	if device.ID != deviceID || device.UserID != userID || device.LastAckSeq != 12 {
+		t.Fatalf("device = %#v, want account-owned device", device)
+	}
+	if !strings.Contains(fake.lastQuery, "WHERE user_id = $1 AND id = $2") {
+		t.Error("GetDevice query does not contain the account ownership predicate")
+	}
+	assertUUIDArg(t, fake.lastArgs[0], userID)
+	assertUUIDArg(t, fake.lastArgs[1], deviceID)
+}

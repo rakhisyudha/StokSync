@@ -8,7 +8,7 @@ HTTPS. JSON request bodies require `Content-Type: application/json`, and JSON
 responses use `Content-Type: application/json; charset=utf-8`. UUIDs are sent as
 strings and timestamps are RFC 3339 UTC values.
 
-The routes implemented at the end of Milestone 2 are:
+The routes currently implemented are:
 
 | Method and path | Authentication | Purpose |
 |---|---|---|
@@ -19,11 +19,7 @@ The routes implemented at the end of Milestone 2 are:
 | `POST /v1/auth/refresh` | None; opaque refresh token in the body | Rotates a refresh token and returns a replacement access/refresh-token pair. |
 | `POST /v1/auth/logout` | `Authorization: Bearer <access-token>` | Revokes active refresh sessions for the authenticated device. It returns `204` with no body. |
 | `GET /v1/snapshot` | `Authorization: Bearer <access-token>` | Returns the complete account-scoped bootstrap replica and a consistent cursor. |
-
-`POST /v1/sync` is not implemented yet and is intentionally not included in
-the HTTP smoke test. Task 3.1 defines its versioned DTO boundary below;
-request handling and operation application are implemented in later Milestone 3
-tasks.
+| `POST /v1/sync` | `Authorization: Bearer <access-token>` | Validates the request/device boundary and processes each received operation in an independent transaction. Task 3.2 currently returns explicit rejected results for unimplemented domain operations and an empty change page. |
 
 ### Sync DTO contract (Milestone 3.1)
 
@@ -90,6 +86,20 @@ default bounds are a 1 MiB request body, 100 operations, 500 requested or
 returned changes, and a 256 KiB individual operation payload. Deployments may
 lower these limits. Unsupported schema errors use
 `{"schema_version":1,"error":"unsupported_schema_version","min_supported_version":1}`.
+
+The sync handler requires a valid access token, requires the request `device_id`
+to equal the device identity in that token, and verifies that the device is
+registered to the authenticated account. Malformed, oversized, and unsupported
+schema requests are rejected before service work. Each received operation is
+sent through its own transaction boundary; a transaction failure becomes an
+isolated rejected result so later operations can still be handled. Until Task
+3.3 supplies domain services, valid operation envelopes return
+`status: "rejected"` with `reason: "operation_not_implemented"`; no product,
+movement, idempotency, or change-log rows are written by this boundary.
+
+The current response still has the complete push/pull shape (`results`,
+`changes`, `next_cursor`, `has_more`, and `server_time`). Task 3.2 returns an
+empty `changes` page and preserves the request cursor.
 
 ### Authentication requests and sessions
 
@@ -200,7 +210,10 @@ The response is versioned and uses UUID strings and RFC 3339 UTC timestamps:
 
 The endpoint bounds database row reads and encoded response size. The default bounds are 10,000 products, 100,000 movements, and 32 MiB; an account exceeding a bound receives `413 snapshot_too_large` rather than a partial response. A request body or query string receives `400 invalid_request`. These limits are intended for v1 catalogs of hundreds to low thousands of products and can be configured at construction time.
 
-Incremental push/pull exchange behavior is intentionally documented in a later milestone; this bootstrap contract does not define `POST /v1/sync`.
+The sync response boundary is now implemented with the behavior described above.
+Incremental change-feed reads, canonical operation application, and idempotency
+persistence remain subsequent tasks; this endpoint intentionally does not claim
+those operations were applied.
 
 ## Reproducible HTTP smoke test
 

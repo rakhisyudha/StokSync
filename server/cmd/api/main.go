@@ -16,6 +16,7 @@ import (
 	"github.com/stoksync/stoksync/server/internal/platform/logging"
 	platformserver "github.com/stoksync/stoksync/server/internal/platform/server"
 	"github.com/stoksync/stoksync/server/internal/snapshot"
+	syncapi "github.com/stoksync/stoksync/server/internal/sync"
 )
 
 func main() {
@@ -63,7 +64,13 @@ func main() {
 		os.Exit(1)
 	}
 	snapshotHandler := snapshot.NewHandler(snapshotService, authService.RequireAuth)
-	handler := httpx.NewRouterWithSnapshot(logger, pool.Ping, authHandler.Routes(), snapshotHandler.Routes())
+	syncService, err := syncapi.NewService(pool)
+	if err != nil {
+		logger.Error("invalid synchronization configuration", "error", err)
+		os.Exit(1)
+	}
+	syncHandler := syncapi.NewHandler(syncService, authService.RequireAuth)
+	handler := httpx.NewRouterWithSnapshotAndSync(logger, pool.Ping, authHandler.Routes(), snapshotHandler.Routes(), syncHandler.Routes())
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

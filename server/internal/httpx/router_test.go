@@ -86,3 +86,22 @@ func TestReadinessEndpointReportsDependencyFailure(t *testing.T) {
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }
+
+func TestRouterMountsSyncRoute(t *testing.T) {
+	t.Parallel()
+
+	syncRoute := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sync" {
+			t.Errorf("mounted sync path = %q, want /v1/sync", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	router := NewRouterWithSnapshotAndSync(testLogger(), nil, nil, nil, syncRoute)
+	request := httptest.NewRequest(http.MethodPost, "/v1/sync", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("sync route status = %d, want 204", recorder.Code)
+	}
+}

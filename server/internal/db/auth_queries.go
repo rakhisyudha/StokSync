@@ -20,6 +20,11 @@ SELECT id, email, password_hash, created_at, updated_at
 FROM users
 WHERE lower(email) = $1`
 
+	getDeviceSQL = `
+SELECT id, user_id, name, platform, last_seen_at, last_ack_seq, created_at
+FROM devices
+WHERE user_id = $1 AND id = $2`
+
 	registerDeviceSQL = `
 INSERT INTO devices (id, user_id, name, platform, last_seen_at)
 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -75,6 +80,13 @@ func (q *Queries) InsertUser(ctx context.Context, params CreateUserParams) (User
 // index. It returns pgx.ErrNoRows without revealing whether an account exists.
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	return scanUser(q.db.QueryRow(ctx, getUserByEmailSQL, email))
+}
+
+// GetDevice returns a registered installation only when it belongs to the
+// requested account. The ownership predicate prevents a valid token from
+// using a device UUID registered to another account.
+func (q *Queries) GetDevice(ctx context.Context, userID, deviceID uuid.UUID) (Device, error) {
+	return scanDevice(q.db.QueryRow(ctx, getDeviceSQL, uuidArg(userID), uuidArg(deviceID)))
 }
 
 // RegisterDevice creates or refreshes an installation only when the existing
