@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,6 +44,8 @@ const (
 	changeEntityMovement = "stock_movement"
 	changeOpUpsert       = "upsert"
 	changeOpDelete       = "delete"
+
+	productMutationSavepoint = "stoksync_product_mutation"
 )
 
 var ErrInvalidStoredOperationResponse = errors.New("stored sync operation response is invalid")
@@ -217,19 +220,28 @@ func (s *Service) applyProductUpsert(ctx context.Context, queries *db.Queries, i
 	}
 
 	var product db.Product
+	var mutate func() (db.Product, error)
 	if errors.Is(lookupErr, pgx.ErrNoRows) {
-		product, err = s.productService.CreateProductInTransaction(ctx, queries, products.CreateProductInput{
-			ID:                payload.ID,
-			UserID:            identity.UserID,
-			Barcode:           payload.Barcode,
-			SKU:               payload.SKU,
-			Name:              payload.Name,
-			Description:       payload.Description,
-			Unit:              payload.Unit,
-			Category:          payload.Category,
-			MinStock:          payload.MinStock,
-			UpdatedByDeviceID: identity.DeviceID,
-		})
+		// A create has no canonical version to compare against. Permit an
+		// omitted or zero base_version, but reject a positive version because
+		// it would claim an existing canonical revision that was never present.
+		if operation.BaseVersion != nil && *operation.BaseVersion != 0 {
+			return rejectedResult(operation.OpID, ReasonInvalidBaseVersion), nil, nil
+		}
+		mutate = func() (db.Product, error) {
+			return s.productService.CreateProductInTransaction(ctx, queries, products.CreateProductInput{
+				ID:                payload.ID,
+				UserID:            identity.UserID,
+				Barcode:           payload.Barcode,
+				SKU:               payload.SKU,
+				Name:              payload.Name,
+				Description:       payload.Description,
+				Unit:              payload.Unit,
+				Category:          payload.Category,
+				MinStock:          payload.MinStock,
+				UpdatedByDeviceID: identity.DeviceID,
+			})
+		}
 	} else {
 		if current.UserID != identity.UserID {
 			return rejectedResult(operation.OpID, ReasonOwnershipViolation), nil, nil
@@ -242,24 +254,38 @@ func (s *Service) applyProductUpsert(ctx context.Context, queries *db.Queries, i
 		if operation.BaseVersion == nil || *operation.BaseVersion <= 0 {
 			return rejectedResult(operation.OpID, ReasonInvalidBaseVersion), nil, nil
 		}
-		product, err = s.productService.UpdateProductInTransaction(ctx, queries, products.UpdateProductInput{
-			ID:                payload.ID,
-			UserID:            identity.UserID,
-			Barcode:           payload.Barcode,
-			SKU:               payload.SKU,
-			Name:              payload.Name,
-			Description:       payload.Description,
-			Unit:              payload.Unit,
-			Category:          payload.Category,
-			MinStock:          payload.MinStock,
-			BaseVersion:       *operation.BaseVersion,
-			UpdatedByDeviceID: identity.DeviceID,
-		})
+		mutate = func() (db.Product, error) {
+			return s.productService.UpdateProductInTransaction(ctx, queries, products.UpdateProductInput{
+				ID:                payload.ID,
+				UserID:            identity.UserID,
+				Barcode:           payload.Barcode,
+				SKU:               payload.SKU,
+				Name:              payload.Name,
+				Description:       payload.Description,
+				Unit:              payload.Unit,
+				Category:          payload.Category,
+				MinStock:          payload.MinStock,
+				BaseVersion:       *operation.BaseVersion,
+				UpdatedByDeviceID: identity.DeviceID,
+			})
+		}
 	}
+	product, err = runProductMutationWithBarcodeRecovery(ctx, queries, mutate)
 	if err != nil {
 		result, ok := rejectedForDomainError(operation.OpID, err)
 		if !ok {
 			return OperationResult{}, nil, err
+		}
+		if errors.Is(err, products.ErrBarcodeConflict) {
+			if err := attachCanonicalBarcodeProductState(
+				ctx,
+				queries,
+				identity.UserID,
+				normalizeBarcode(payload.Barcode),
+				&result,
+			); err != nil {
+				return OperationResult{}, nil, err
+			}
 		}
 		if errors.Is(err, products.ErrVersionConflict) || errors.Is(err, products.ErrProductDeleted) {
 			if err := attachCanonicalProductState(ctx, queries, identity.UserID, payload.ID, &result); err != nil {
@@ -318,6 +344,46 @@ func (s *Service) applyProductDelete(ctx context.Context, queries *db.Queries, i
 		EntityID: product.ID,
 		Payload:  payloadJSON,
 	}, nil
+}
+
+func runProductMutationWithBarcodeRecovery(
+	ctx context.Context,
+	queries *db.Queries,
+	mutate func() (db.Product, error),
+) (db.Product, error) {
+	if queries == nil || mutate == nil {
+		return db.Product{}, ErrInvalidService
+	}
+	if _, err := queries.DB().Exec(ctx, "SAVEPOINT "+productMutationSavepoint); err != nil {
+		return db.Product{}, err
+	}
+
+	product, err := mutate()
+	if err == nil {
+		if _, releaseErr := queries.DB().Exec(ctx, "RELEASE SAVEPOINT "+productMutationSavepoint); releaseErr != nil {
+			return db.Product{}, releaseErr
+		}
+		return product, nil
+	}
+	if !errors.Is(err, products.ErrBarcodeConflict) {
+		// Validation and optimistic-concurrency misses do not abort PostgreSQL;
+		// release the savepoint so the enclosing transaction can persist their
+		// stable rejected result. Unexpected database errors abort the enclosing
+		// transaction and are returned unchanged.
+		_, _ = queries.DB().Exec(ctx, "RELEASE SAVEPOINT "+productMutationSavepoint)
+		return db.Product{}, err
+	}
+
+	// A unique-index violation aborts the current PostgreSQL statement. Roll
+	// back only this mutation so the enclosing operation transaction can still
+	// read the canonical owner and persist a rejected idempotency outcome.
+	if _, rollbackErr := queries.DB().Exec(ctx, "ROLLBACK TO SAVEPOINT "+productMutationSavepoint); rollbackErr != nil {
+		return db.Product{}, rollbackErr
+	}
+	if _, releaseErr := queries.DB().Exec(ctx, "RELEASE SAVEPOINT "+productMutationSavepoint); releaseErr != nil {
+		return db.Product{}, releaseErr
+	}
+	return db.Product{}, err
 }
 
 func (s *Service) finalizeOperation(ctx context.Context, queries *db.Queries, identity auth.Identity, opID uuid.UUID, result OperationResult) error {
@@ -438,6 +504,41 @@ func productState(product db.Product) json.RawMessage {
 		return nil
 	}
 	return payload
+}
+
+func normalizeBarcode(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func attachCanonicalBarcodeProductState(
+	ctx context.Context,
+	queries *db.Queries,
+	userID uuid.UUID,
+	barcode *string,
+	result *OperationResult,
+) error {
+	if result == nil {
+		return errors.New("operation result is required")
+	}
+	if barcode == nil {
+		return nil
+	}
+	product, err := queries.GetActiveProductByBarcode(ctx, userID, *barcode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	result.ServerState = productState(product)
+	return nil
 }
 
 func attachCanonicalProductState(ctx context.Context, queries *db.Queries, userID, productID uuid.UUID, result *OperationResult) error {

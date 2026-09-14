@@ -85,6 +85,7 @@ class PendingOperations extends Table {
   TextColumn get entityId => text()();
   TextColumn get operation => text().named('op')();
   TextColumn get payload => text()();
+  TextColumn get basePayload => text().nullable().named('base_payload')();
   IntColumn get baseVersion => integer().nullable()();
   IntColumn get attempts => integer().withDefault(const Constant(0))();
   DateTimeColumn get nextAttemptAt =>
@@ -155,9 +156,17 @@ class Conflicts extends Table {
 /// Schema version 1 establishes the local-first data model. Schema version 2
 /// adds data-preserving SQLite guards for immutable ledger fields. Schema
 /// version 3 adds durable blocked/idle synchronization status metadata without
-/// touching local domain, queue, or conflict rows. Later versions must add
-/// explicit migration steps in [migration.onUpgrade] rather than replacing the
-/// database, preserving queued operations and audit data.
+/// touching local domain, queue, or conflict rows. Schema version 4 adds a
+/// local-only product base snapshot to pending operations. It is never sent on
+/// the wire, but lets version-conflict reconciliation perform a lossless
+/// field-level three-way merge. Schema version 5 allows a retained
+/// barcode-conflict row to coexist with its canonical owner while preserving
+/// the local unique index for non-conflict rows. Schema version 6 permits one
+/// narrow server-reconciliation exception: a pending stocktake may receive its
+/// canonical delta while transitioning to synced. Persisted synced ledger rows
+/// remain immutable. Later versions must add explicit migration steps in
+/// [migration.onUpgrade] rather than replacing the database, preserving queued
+/// operations and audit data.
 @DriftDatabase(
   tables: [
     Products,
@@ -172,7 +181,7 @@ class StokSyncDatabase extends _$StokSyncDatabase {
   StokSyncDatabase(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -187,6 +196,28 @@ class StokSyncDatabase extends _$StokSyncDatabase {
           "ALTER TABLE sync_state ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'",
         );
       }
+      if (from < 4) {
+        await customStatement(
+          'ALTER TABLE pending_ops ADD COLUMN base_payload TEXT',
+        );
+      }
+      if (from < 5) {
+        // A blocked barcode contender remains locally visible while its
+        // canonical owner is pulled. Excluding only conflict rows from the
+        // local unique index preserves the rejected payload and lets the
+        // canonical owner coexist until the user resolves the conflict.
+        await customStatement(
+          'DROP INDEX IF EXISTS products_active_barcode_unique',
+        );
+      }
+      if (from < 6) {
+        // Recreate the immutability guard with the narrow exception used when
+        // the server replaces a pending stocktake's optimistic delta with its
+        // canonical delta as the row becomes synced.
+        await customStatement(
+          'DROP TRIGGER IF EXISTS stock_movements_prevent_domain_update',
+        );
+      }
       await _createIndexes();
       await _ensureSyncState();
     },
@@ -199,7 +230,8 @@ class StokSyncDatabase extends _$StokSyncDatabase {
     await customStatement(
       'CREATE UNIQUE INDEX IF NOT EXISTS products_active_barcode_unique '
       'ON products (barcode) '
-      'WHERE barcode IS NOT NULL AND deleted_at IS NULL',
+      "WHERE barcode IS NOT NULL AND deleted_at IS NULL "
+      "AND sync_status <> 'conflict'",
     );
     await customStatement(
       'CREATE INDEX IF NOT EXISTS products_active_name_index '
@@ -221,7 +253,21 @@ class StokSyncDatabase extends _$StokSyncDatabase {
       'CREATE TRIGGER IF NOT EXISTS stock_movements_prevent_domain_update '
       'BEFORE UPDATE OF id, product_id, delta, kind, note, occurred_at, '
       'raw_occurred_at, clock_offset_ms, counted_qty, reverses_id, device_id '
-      'ON stock_movements BEGIN '
+      'ON stock_movements '
+      'WHEN NOT (OLD.sync_status = \'pending\' '
+      'AND NEW.sync_status = \'synced\' '
+      'AND OLD.kind = \'stocktake\' '
+      'AND OLD.id IS NEW.id '
+      'AND OLD.product_id IS NEW.product_id '
+      'AND OLD.kind IS NEW.kind '
+      'AND OLD.note IS NEW.note '
+      'AND OLD.occurred_at IS NEW.occurred_at '
+      'AND OLD.raw_occurred_at IS NEW.raw_occurred_at '
+      'AND OLD.clock_offset_ms IS NEW.clock_offset_ms '
+      'AND OLD.counted_qty IS NEW.counted_qty '
+      'AND OLD.reverses_id IS NEW.reverses_id '
+      'AND OLD.device_id IS NEW.device_id) '
+      'BEGIN '
       "SELECT RAISE(ABORT, 'stock movement ledger fields are immutable'); "
       'END',
     );

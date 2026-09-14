@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:sync_engine/sync_engine.dart';
 
+import '../../core/identifiers/uuid_v7_generator.dart';
+import 'product_three_way_merge.dart';
+import 'remote_change_applier.dart';
 import 'stoksync_database.dart';
 
 /// Applies push outcomes to the local replica.
@@ -14,11 +17,16 @@ import 'stoksync_database.dart';
 /// consequence has been persisted; a rejected row is retained as blocked work
 /// and paired with an inspectable conflict record.
 final class DriftSyncResponseReconciler {
-  DriftSyncResponseReconciler(this._database, {DateTime Function()? clock})
-    : _clock = clock ?? _utcNow;
+  DriftSyncResponseReconciler(
+    this._database, {
+    DateTime Function()? clock,
+    IdentifierGenerator? identifierGenerator,
+  }) : _clock = clock ?? _utcNow,
+       _identifierGenerator = identifierGenerator ?? UuidV7Generator();
 
   final StokSyncDatabase _database;
   final DateTime Function() _clock;
+  final IdentifierGenerator _identifierGenerator;
 
   /// Reconciles the response for the operations claimed by one sync cycle.
   ///
@@ -378,12 +386,21 @@ final class DriftSyncResponseReconciler {
       existing.productId,
       'changes.${change.seq}.data.product_id',
     );
-    _assertOptionalIntEquals(
-      data,
-      'delta',
-      existing.delta,
-      'changes.${change.seq}.data.delta',
-    );
+    final canonicalDelta = data.containsKey('delta')
+        ? _requiredInt(data, 'delta', 'changes.${change.seq}.data.delta')
+        : existing.delta;
+    if (canonicalDelta == 0) {
+      throw _invalidResponse(
+        'changes.${change.seq}.data.delta',
+        'must not be zero',
+      );
+    }
+    if (canonicalDelta != existing.delta && existing.kind != 'stocktake') {
+      throw _invalidResponse(
+        'changes.${change.seq}.data.delta',
+        'does not match the local ledger row',
+      );
+    }
     _assertOptionalStringEquals(
       data,
       'kind',
@@ -443,14 +460,38 @@ final class DriftSyncResponseReconciler {
     final serverCreatedAtValue = hasServerCreatedAt || change.createdAt != null
         ? Value<DateTime?>(serverCreatedAt)
         : const Value<DateTime?>.absent();
+    final deltaCorrection = canonicalDelta - existing.delta;
     await (_database.update(
       _database.stockMovements,
     )..where((row) => row.id.equals(operation.entityId))).write(
       StockMovementsCompanion(
+        delta: deltaCorrection == 0
+            ? const Value<int>.absent()
+            : Value(canonicalDelta),
         serverCreatedAt: serverCreatedAtValue,
         syncStatus: const Value('synced'),
       ),
     );
+    if (deltaCorrection != 0) {
+      final balance =
+          await (_database.select(_database.productBalances)
+                ..where((row) => row.productId.equals(existing.productId)))
+              .getSingleOrNull();
+      if (balance == null) {
+        throw _invalidResponse(
+          'changes.${change.seq}.data.delta',
+          'cannot reconcile stocktake without a local balance projection',
+        );
+      }
+      await (_database.update(
+        _database.productBalances,
+      )..where((row) => row.productId.equals(existing.productId))).write(
+        ProductBalancesCompanion(
+          qty: Value(balance.qty + deltaCorrection),
+          updatedAt: Value(serverTime.toUtc()),
+        ),
+      );
+    }
   }
 
   Future<void> _insertCanonicalMovement(
@@ -609,6 +650,9 @@ final class DriftSyncResponseReconciler {
       );
     }
 
+    final mergedFollowUp = reason == 'version_conflict'
+        ? await _prepareMergedFollowUp(operation, result)
+        : null;
     final updated =
         await (_database.update(_database.pendingOperations)..where(
               (row) =>
@@ -633,13 +677,20 @@ final class DriftSyncResponseReconciler {
     final serverPayload = result.serverState == null
         ? null
         : jsonEncode(result.serverState);
-    final basePayload = operation.baseVersion == null
-        ? null
-        : jsonEncode(<String, Object?>{'base_version': operation.baseVersion});
+    final basePayload =
+        operation.basePayload ??
+        (operation.baseVersion == null
+            ? null
+            : jsonEncode(<String, Object?>{
+                'base_version': operation.baseVersion,
+              }));
     final createdAt = _clock().toUtc();
     final existing = await (_database.select(
       _database.conflicts,
     )..where((row) => row.opId.equals(operation.opId))).getSingleOrNull();
+    final resolutionStatus = mergedFollowUp == null
+        ? 'unresolved'
+        : 'auto_merged';
     if (existing == null) {
       await _database
           .into(_database.conflicts)
@@ -653,6 +704,7 @@ final class DriftSyncResponseReconciler {
               serverPayload: Value(serverPayload),
               reason: reason,
               createdAt: Value(createdAt),
+              resolutionStatus: Value(resolutionStatus),
             ),
           );
     } else {
@@ -667,11 +719,243 @@ final class DriftSyncResponseReconciler {
           serverPayload: Value(serverPayload),
           reason: Value(reason),
           createdAt: Value(createdAt),
+          resolutionStatus: Value(resolutionStatus),
         ),
       );
     }
 
+    if (mergedFollowUp == null) {
+      await _markLocalStatusIfPresent(operation, 'conflict');
+      await _applyCanonicalTombstoneIfPresent(operation, result);
+    } else {
+      await _applyMergedFollowUp(mergedFollowUp);
+    }
+  }
+
+  /// A rejected product edit can race with a delete before the corresponding
+  /// tombstone reaches this replica through the change feed. Apply the
+  /// complete canonical deleted state now, but keep the blocked operation and
+  /// conflict row so the rejected local intent remains auditable.
+  Future<void> _applyCanonicalTombstoneIfPresent(
+    PendingOperation operation,
+    SyncOperationResult result,
+  ) async {
+    if (operation.entity != 'product' || result.serverState == null) {
+      return;
+    }
+    final serverState = result.serverState!;
+    if (serverState['deleted_at'] == null) {
+      return;
+    }
+    if (serverState['id'] != operation.entityId) {
+      throw _invalidResponse(
+        'results.${result.opId}.server_state.id',
+        'does not match the rejected product operation entity',
+      );
+    }
+    final deletedAt = _dateTime(
+      serverState['deleted_at'],
+      'results.${result.opId}.server_state.deleted_at',
+    );
+    await DriftRemoteChangeApplier(
+      _database,
+      clock: _clock,
+    ).applyChangeInTransaction(
+      SyncChangeEntry(
+        seq: 1,
+        entity: 'product',
+        operation: 'delete',
+        data: serverState,
+        createdAt: deletedAt,
+      ),
+      serverTime: deletedAt,
+    );
+    // The applier preserves pending/conflict status by design. Marking the
+    // row after the canonical write makes the rejected intent explicit while
+    // retaining the tombstone as the local catalog state.
     await _markLocalStatusIfPresent(operation, 'conflict');
+  }
+
+  Future<_MergedProductFollowUp?> _prepareMergedFollowUp(
+    PendingOperation operation,
+    SyncOperationResult result,
+  ) async {
+    if (operation.entity != 'product' ||
+        operation.operation != 'upsert_product' ||
+        operation.baseVersion == null ||
+        result.serverState == null) {
+      return null;
+    }
+    final base = _decodeObject(operation.basePayload);
+    final local = _decodeObject(operation.payload);
+    if (base == null || local == null) {
+      return null;
+    }
+    final server = result.serverState!;
+    // A canonical tombstone is never eligible for a three-way edit merge.
+    // This explicit guard keeps delete-wins independent of the editable-field
+    // comparison and prevents a future merge change from creating a
+    // resurrection follow-up.
+    if (server['deleted_at'] != null) {
+      return null;
+    }
+    final serverVersion = server['version'];
+    if (serverVersion is! int ||
+        serverVersion <= 0 ||
+        serverVersion <= operation.baseVersion!) {
+      return null;
+    }
+
+    final comparison = ProductThreeWayMerge.compare(
+      base: base,
+      local: local,
+      server: server,
+    );
+    final mergedPayload = comparison?.mergedPayload;
+    if (mergedPayload == null) {
+      return null;
+    }
+    try {
+      validateMergedProductPayload(mergedPayload);
+    } on Object {
+      return null;
+    }
+
+    final existing = await (_database.select(
+      _database.products,
+    )..where((row) => row.id.equals(operation.entityId))).getSingleOrNull();
+    if (existing == null || existing.deletedAt != null) {
+      return null;
+    }
+    final operationId = await _allocateFollowUpOperationId();
+    return _MergedProductFollowUp(
+      operationId: operationId,
+      payload: jsonEncode(mergedPayload),
+      basePayload: jsonEncode(_editableProductPayload(server)),
+      baseVersion: serverVersion,
+      now: _clock().toUtc(),
+    );
+  }
+
+  Future<void> _applyMergedFollowUp(_MergedProductFollowUp followUp) async {
+    final payload = _decodeObject(followUp.payload);
+    if (payload == null) {
+      throw StateError('merged product payload is not a JSON object');
+    }
+    final productId = payload['id'];
+    final name = payload['name'];
+    final unit = payload['unit'];
+    final barcode = payload['barcode'];
+    final sku = payload['sku'];
+    final description = payload['description'];
+    final category = payload['category'];
+    final minStock = payload['min_stock'];
+    if (productId is! String ||
+        name is! String ||
+        unit is! String ||
+        barcode is! String? ||
+        sku is! String? ||
+        description is! String? ||
+        category is! String? ||
+        minStock is! int?) {
+      throw StateError('merged product payload has invalid field types');
+    }
+    final existing = await (_database.select(
+      _database.products,
+    )..where((row) => row.id.equals(productId))).getSingleOrNull();
+    if (existing == null || existing.deletedAt != null) {
+      throw StateError('merged product row is no longer active locally');
+    }
+
+    await (_database.update(
+      _database.products,
+    )..where((row) => row.id.equals(productId))).write(
+      ProductsCompanion(
+        barcode: Value(barcode),
+        sku: Value(sku),
+        name: Value(name),
+        description: Value(description),
+        unit: Value(unit),
+        category: Value(category),
+        minStock: Value(minStock),
+        version: Value(followUp.baseVersion + 1),
+        updatedAt: Value(followUp.now),
+        updatedBy: Value(existing.updatedBy),
+        deletedAt: const Value(null),
+        createdAt: Value(existing.createdAt),
+        syncStatus: const Value('pending'),
+      ),
+    );
+
+    final maximumSequence = _database.pendingOperations.localSeq.max();
+    final row = await (_database.selectOnly(
+      _database.pendingOperations,
+    )..addColumns([maximumSequence])).getSingle();
+    final localSequence = (row.read(maximumSequence) ?? 0) + 1;
+    await _database
+        .into(_database.pendingOperations)
+        .insert(
+          PendingOperationsCompanion.insert(
+            opId: followUp.operationId,
+            localSeq: localSequence,
+            entity: 'product',
+            entityId: productId,
+            operation: 'upsert_product',
+            payload: followUp.payload,
+            basePayload: Value(followUp.basePayload),
+            baseVersion: Value(followUp.baseVersion),
+            nextAttemptAt: Value(followUp.now),
+          ),
+        );
+  }
+
+  Future<String> _allocateFollowUpOperationId() async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final operationId = _identifierGenerator.generate();
+      if (!UuidV7.isValid(operationId)) {
+        throw StateError('merged operation id must be a UUIDv7');
+      }
+      final pending = await (_database.select(
+        _database.pendingOperations,
+      )..where((row) => row.opId.equals(operationId))).getSingleOrNull();
+      final conflict = await (_database.select(
+        _database.conflicts,
+      )..where((row) => row.opId.equals(operationId))).getSingleOrNull();
+      if (pending == null && conflict == null) {
+        return operationId;
+      }
+    }
+    throw StateError('could not allocate a unique merged operation id');
+  }
+
+  Map<String, Object?>? _decodeObject(String? source) {
+    if (source == null) {
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(source);
+      if (decoded is! Map) {
+        return null;
+      }
+      final result = <String, Object?>{};
+      for (final entry in decoded.entries) {
+        if (entry.key is! String) {
+          return null;
+        }
+        result[entry.key as String] = entry.value;
+      }
+      return result;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Map<String, Object?> _editableProductPayload(Map<String, Object?> state) {
+    final payload = <String, Object?>{'id': state['id']};
+    for (final field in productMergeFields) {
+      payload[field] = state[field];
+    }
+    return payload;
   }
 
   Future<void> _markLocalStatusIfPresent(
@@ -707,6 +991,22 @@ final class DriftSyncResponseReconciler {
       );
     }
   }
+}
+
+final class _MergedProductFollowUp {
+  const _MergedProductFollowUp({
+    required this.operationId,
+    required this.payload,
+    required this.basePayload,
+    required this.baseVersion,
+    required this.now,
+  });
+
+  final String operationId;
+  final String payload;
+  final String basePayload;
+  final int baseVersion;
+  final DateTime now;
 }
 
 String _requiredString(Map<String, Object?> data, String key, String field) {

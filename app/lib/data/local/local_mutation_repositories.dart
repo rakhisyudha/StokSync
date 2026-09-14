@@ -138,6 +138,7 @@ final class PendingOperationDao implements SyncPendingOperationStore {
     required String entityId,
     required String operation,
     required String payload,
+    String? basePayload,
     required int? baseVersion,
     required DateTime enqueuedAt,
   }) async {
@@ -152,6 +153,7 @@ final class PendingOperationDao implements SyncPendingOperationStore {
             entityId: entityId,
             operation: operation,
             payload: payload,
+            basePayload: Value(basePayload),
             baseVersion: Value(baseVersion),
             nextAttemptAt: Value(enqueuedAt.toUtc()),
           ),
@@ -344,6 +346,10 @@ final class LocalProductRepository {
               unit: Value(normalizedDraft.unit),
               category: Value(normalizedDraft.category),
               minStock: Value(normalizedDraft.minStock),
+              // PostgreSQL product versions are one-based. Keeping the local
+              // optimistic version aligned lets edits queued after a local
+              // create use base_version 1 once the create is applied.
+              version: const Value(1),
               updatedAt: Value(now),
               createdAt: Value(now),
               syncStatus: const Value('pending'),
@@ -378,7 +384,9 @@ final class LocalProductRepository {
   }
 
   /// Replaces active product details and enqueues an optimistic update using
-  /// the currently replicated canonical version as its base version.
+  /// the current local canonical/optimistic version as its base version. The
+  /// local row advances immediately so multiple offline edits remain FIFO
+  /// compatible with PostgreSQL's one-based product versions.
   Future<ProductMutationResult> update({
     required String productId,
     required ProductDraft draft,
@@ -391,6 +399,7 @@ final class LocalProductRepository {
 
     final result = await _database.transaction(() async {
       final product = await _requireActiveProduct(productId);
+      final baseVersion = product.version < 1 ? 1 : product.version;
       await (_database.update(
         _database.products,
       )..where((row) => row.id.equals(productId))).write(
@@ -402,6 +411,7 @@ final class LocalProductRepository {
           unit: Value(normalizedDraft.unit),
           category: Value(normalizedDraft.category),
           minStock: Value(normalizedDraft.minStock),
+          version: Value(baseVersion + 1),
           updatedAt: Value(now),
           updatedBy: Value(deviceId),
           syncStatus: const Value('pending'),
@@ -413,7 +423,8 @@ final class LocalProductRepository {
         entityId: productId,
         operation: 'upsert_product',
         payload: _productPayload(productId, normalizedDraft),
-        baseVersion: product.version,
+        basePayload: _productBasePayload(product),
+        baseVersion: baseVersion,
         enqueuedAt: now,
       );
       return ProductMutationResult(
@@ -436,11 +447,13 @@ final class LocalProductRepository {
 
     final result = await _database.transaction(() async {
       final product = await _requireActiveProduct(productId);
+      final baseVersion = product.version < 1 ? 1 : product.version;
       await (_database.update(
         _database.products,
       )..where((row) => row.id.equals(productId))).write(
         ProductsCompanion(
           deletedAt: Value(now),
+          version: Value(baseVersion + 1),
           updatedAt: Value(now),
           updatedBy: Value(deviceId),
           syncStatus: const Value('pending'),
@@ -452,7 +465,8 @@ final class LocalProductRepository {
         entityId: productId,
         operation: 'delete_product',
         payload: jsonEncode({'id': productId, 'deleted_at': _iso8601(now)}),
-        baseVersion: product.version,
+        basePayload: _productBasePayload(product),
+        baseVersion: baseVersion,
         enqueuedAt: now,
       );
       return ProductMutationResult(
@@ -898,6 +912,19 @@ final class _ResolvedMovementTiming {
   final DateTime occurredAt;
   final DateTime rawOccurredAt;
   final int clockOffsetMs;
+}
+
+String _productBasePayload(Product product) {
+  return jsonEncode({
+    'id': product.id,
+    'barcode': product.barcode,
+    'sku': product.sku,
+    'name': product.name,
+    'description': product.description,
+    'unit': product.unit,
+    'category': product.category,
+    'min_stock': product.minStock,
+  });
 }
 
 String _productPayload(String productId, ProductDraft draft) {

@@ -56,15 +56,32 @@ The supported operation envelopes are `add_movement`, `upsert_product`, and
 `base_version` is a canonical optimistic-concurrency field for product
 mutations: an upsert that edits an existing product and every delete must carry
 the positive version observed by the client; a create upsert may omit it (or
-carry zero while the product is not yet present on the server). Movement
-operations must omit `base_version`. The server checks the version in the same
-PostgreSQL mutation statement that writes the product, so concurrent writers
-cannot both apply an edit based on the same version. Payload fields are
-strictly decoded. Movement payloads require `id`, `product_id`, non-zero
-`delta`, a supported `kind`, and `occurred_at`; product upserts require `id`
-and `name`; deletes require `id`. Optional movement audit fields include
-`raw_occurred_at`, `clock_offset_ms`, `counted_qty`, `reverses_id`, and
-`device_id`.
+carry zero while the product is not yet present on the server). A positive
+`base_version` is invalid for a create because there is no canonical revision
+from which it could have been based. Movement operations must omit
+`base_version`. Product edits require an exact current version, while deletes
+use delete-wins ordering: an active product may be tombstoned when its current
+version is equal to or newer than the supplied positive base version, but a
+base version newer than the canonical row is rejected. This lets a delete that
+raced with an already accepted edit win deterministically. The server checks
+the applicable predicate in the same PostgreSQL mutation statement that writes
+the product, so concurrent writers cannot produce an active resurrection.
+Payload fields are strictly decoded. Movement payloads require `id`,
+`product_id`, non-zero `delta`, a supported `kind`, and `occurred_at`; product
+upserts require `id` and `name`; deletes require `id`. Optional movement audit
+fields include `raw_occurred_at`, `clock_offset_ms`, `counted_qty`,
+`reverses_id`, and `device_id`.
+
+For a `stocktake`, `counted_qty` is the absolute non-negative physical count
+and the client `delta` is only an optimistic local value. The server locks the
+active product row, reads the ledger-derived canonical balance, and computes
+`delta = counted_qty - canonical_balance` in the same PostgreSQL transaction
+that inserts the immutable movement and updates `product_balances`. The stored
+change-log payload therefore contains both the submitted `counted_qty` and the
+server-computed delta. A zero computed delta is rejected because every retained
+movement must have a non-zero delta. The idempotency outcome and change-log
+entry commit with that movement, so retrying the same operation replays the
+original canonical result without recomputing or inserting another row.
 
 A successful response includes `schema_version`, independent per-operation
 `results`, an ordered `changes` page, `next_cursor`, `has_more`, and UTC
@@ -86,16 +103,83 @@ A successful response includes `schema_version`, independent per-operation
 }
 ```
 
-A rejected product edit with `reason: "version_conflict"` is a successful
-per-operation outcome, not a failed sync exchange. Its `server_state` contains
-the latest account-owned canonical product representation, including `id`,
-all product fields, `version`, timestamps, update device, and deletion state.
-The state is read again after the conditional mutation misses, so a concurrent
-writer cannot cause the response to report the product snapshot observed before
-that writer committed. The result is persisted in `sync_ops` and is replayed
-unchanged for a duplicate `(device_id, op_id)` delivery. No product write or
-change-log entry is created for the rejected operation; the client retains the
-local operation and records the base/local/server values for later resolution.
+The client stores the local product fields that were present before an
+editable product mutation in a local-only `pending_ops.base_payload` column.
+This snapshot is not included in the HTTP operation envelope. When a product
+upsert is rejected with `version_conflict`, the client compares the base,
+local operation payload, and the complete `server_state` by field for
+`barcode`, `sku`, `name`, `description`, `unit`, `category`, and `min_stock`.
+
+Only disjoint edits are merged: fields changed by the local operation are
+copied onto the current server values, while server-only changes are retained.
+The local optimistic product row is updated with that merged payload and the
+client atomically keeps the rejected operation blocked, records its full
+base/local/server conflict history with `resolution_status: "auto_merged"`,
+and queues a new UUIDv7 `upsert_product` operation whose `base_version` is the
+current server version. The new operation has its own base snapshot, so a
+second concurrent edit can be classified again. The original operation is
+never deleted or rewritten.
+
+The server classifies an active-barcode collision from PostgreSQL's
+`products_active_barcode_uq` partial unique index (`barcode` where
+`deleted_at IS NULL`). The failed product statement is rolled back to a
+transaction savepoint before the server reads the account-scoped active product
+that owns the barcode. The operation result is therefore a stable rejected
+`reason: "barcode_conflict"` with the complete canonical owner in
+`server_state`, for example:
+
+```json
+{
+  "op_id": "0192f3a2-0000-7000-8000-000000000001",
+  "status": "rejected",
+  "reason": "barcode_conflict",
+  "server_state": {
+    "id": "0192e1aa-0000-7000-8000-000000000009",
+    "barcode": "089686010947",
+    "name": "Canonical product",
+    "version": 1,
+    "deleted_at": null
+  }
+}
+```
+
+The contender is never inserted or updated, no change-log entry is created,
+and the rejected result is finalized in the same `(device_id, op_id)`
+idempotency transaction. Retrying the operation replays that exact structured
+outcome without invoking product mutation again. On the client, the pending
+operation remains blocked with its original local payload and the conflict row
+stores local payload, canonical owner state, and `barcode_conflict`; local
+intent is not replaced or discarded. The local partial index excludes only
+`sync_status = 'conflict'` rows, so the canonical owner can be pulled into the
+same replica while the rejected contender remains visible for resolution. A
+tombstone does not participate in the server partial index, so its former
+barcode can be claimed by a later active product.
+
+A product tombstone wins over a concurrent edit in both arrival orders. The
+server accepts an active delete whose positive base version is not ahead of
+the current row, so an edit committed first cannot outrank a delete based on
+the same offline snapshot. If the tombstone commits first, a later edit is
+rejected with `reason: "product_deleted"` and the complete deleted product in
+`server_state`; neither outcome creates an active resurrection. On the client,
+a rejected edit remains a blocked pending row and its conflict retains the
+local payload, optional base snapshot, canonical deleted state, and
+`product_deleted` reason. The client immediately applies that canonical
+`tombstone` while keeping the product row and historical movements for audit.
+No three-way merge or merged follow-up is created for a deleted canonical
+state. Later remote upserts are ignored once `deleted_at` is present, even when
+their optimistic local version is higher than the tombstone version.
+
+If a base snapshot is unavailable, the canonical state is deleted, a required
+field is malformed, or any field is changed by both sides, no guess is made:
+the original operation remains blocked and the conflict remains
+`resolution_status: "unresolved"` for user resolution. An overlap includes
+same-field edits even when both values happen to be equal; this keeps the
+client's automatic policy limited to provably disjoint intent.
+
+The client stores this local-only metadata immediately after the product edit
+is written, in the same SQLite transaction as the optimistic row and queue
+entry. A merged follow-up is therefore durable across restart and uses the
+same FIFO queue and idempotency semantics as any other local mutation.
 
 The strict decoder rejects unknown fields, missing required fields, malformed
 UUIDs/timestamps, trailing JSON values, and non-object operation payloads. The
@@ -189,7 +273,12 @@ consequence once and page application advances over that sequence without a
 second row write; the cursor still advances across the full page. This keeps
 first-time own writes safe when SQLite timestamp precision is coarser than the
 server payload, and replay after an interrupted cursor commit remains
-idempotent. Each follow-up request reads the cursor
+idempotent. For an applied stocktake, the local pending row may contain a
+stale optimistic delta. Reconciliation replaces that pending delta with the
+server change's computed canonical delta and adjusts the local balance by the
+difference in the same SQLite transaction before removing the queue row;
+ordinary synced movement rows remain immutable. Each follow-up request reads
+the cursor
 persisted by the previous page application rather than trusting an in-memory
 response value, so a page cannot be skipped after a crash. A follow-up must
 advance the cursor and return no operation results; an empty page must preserve

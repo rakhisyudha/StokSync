@@ -189,6 +189,142 @@ func TestServiceReturnsCurrentStateForStaleProductDelete(t *testing.T) {
 	assertStoredOperationResult(t, tx, result)
 }
 
+func TestServiceRejectsProductEditAfterTombstoneWithCanonicalState(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	productID := uuid.New()
+	deletedAt := time.Date(2026, time.July, 8, 9, 12, 0, 0, time.UTC)
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(1),
+		Payload: mustJSON(t, UpsertProductPayload{ID: productID, Name: "Rejected edit", Unit: "pcs"}),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 2, &deletedAt),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	if result.OpID != operation.OpID || result.Status != ResultStatusRejected || result.Reason != ReasonProductDeleted {
+		t.Fatalf("result = %#v, want product-deleted rejection", result)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(result.ServerState, &state); err != nil {
+		t.Fatalf("decode canonical tombstone: %v", err)
+	}
+	if state["id"] != productID.String() || state["deleted_at"] == nil || state["version"] != float64(2) {
+		t.Fatalf("canonical tombstone state = %#v, want product %s version 2 with deleted_at", state, productID)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
+func TestServiceReturnsCanonicalOwnerForDuplicateBarcode(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	ownerID := uuid.New()
+	productID := uuid.New()
+	barcode := "shared-barcode"
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct,
+		Payload: mustJSON(t, UpsertProductPayload{
+			ID: productID, Barcode: &barcode, Name: "Offline duplicate", Unit: "pcs",
+		}),
+	}
+	uniqueViolation := &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: products.ActiveBarcodeUniqueIndex,
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncErrorRow(pgx.ErrNoRows),
+		syncErrorRow(uniqueViolation),
+		syncProductRowWithBarcode(ownerID, identity.UserID, identity.DeviceID, 1, nil, barcode),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	if result.OpID != operation.OpID || result.Status != ResultStatusRejected || result.Reason != ReasonBarcodeConflict {
+		t.Fatalf("result = %#v, want structured barcode conflict", result)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(result.ServerState, &state); err != nil {
+		t.Fatalf("decode canonical owner state: %v", err)
+	}
+	if state["id"] != ownerID.String() || state["barcode"] != barcode || state["name"] != "Test product" {
+		t.Fatalf("canonical owner state = %#v, want owner %s with barcode %q", state, ownerID, barcode)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	if !reflect.DeepEqual(tx.execQueries, []string{
+		"SAVEPOINT stoksync_product_mutation",
+		"ROLLBACK TO SAVEPOINT stoksync_product_mutation",
+		"RELEASE SAVEPOINT stoksync_product_mutation",
+	}) {
+		t.Fatalf("savepoint statements = %#v", tx.execQueries)
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
+func TestServiceReturnsCanonicalOwnerForDuplicateBarcodeUpdate(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	ownerID := uuid.New()
+	productID := uuid.New()
+	barcode := "shared-barcode"
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(1),
+		Payload: mustJSON(t, UpsertProductPayload{
+			ID: productID, Barcode: &barcode, Name: "Offline barcode edit", Unit: "pcs",
+		}),
+	}
+	uniqueViolation := &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: products.ActiveBarcodeUniqueIndex,
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 1, nil),
+		syncErrorRow(uniqueViolation),
+		syncProductRowWithBarcode(ownerID, identity.UserID, identity.DeviceID, 1, nil, barcode),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	if result.Status != ResultStatusRejected || result.Reason != ReasonBarcodeConflict {
+		t.Fatalf("result = %#v, want barcode conflict", result)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(result.ServerState, &state); err != nil {
+		t.Fatalf("decode canonical owner state: %v", err)
+	}
+	if state["id"] != ownerID.String() || state["barcode"] != barcode {
+		t.Fatalf("canonical owner state = %#v, want owner %s with barcode %q", state, ownerID, barcode)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
 func assertVersionConflictState(t *testing.T, result OperationResult, operationID, productID uuid.UUID, wantVersion int64) {
 	t.Helper()
 	if result.OpID != operationID || result.Status != ResultStatusRejected || result.Reason != ReasonVersionConflict {
@@ -205,6 +341,39 @@ func assertVersionConflictState(t *testing.T, result OperationResult, operationI
 		t.Fatalf("server state id = %#v, want %s", state["id"], productID)
 	}
 }
+func TestServiceRejectsPositiveBaseVersionForNewProduct(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(7),
+		Payload: mustJSON(t, UpsertProductPayload{ID: uuid.New(), Name: "New product", Unit: "pcs"}),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncErrorRow(pgx.ErrNoRows),
+		syncOperationRow(identity, operation.OpID, ResultStatusRejected, []byte(`{"status":"rejected"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	if result.Status != ResultStatusRejected || result.Reason != ReasonInvalidBaseVersion {
+		t.Fatalf("result = %#v, want invalid base-version rejection", result)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want committed rejection", tx.commitCalls, tx.rollbackCalls)
+	}
+	for _, query := range tx.queries {
+		if strings.Contains(query, "INSERT INTO products") || strings.Contains(query, "INSERT INTO change_log") {
+			t.Fatalf("invalid create base version performed a write: %q", query)
+		}
+	}
+	assertStoredOperationResult(t, tx, result)
+}
+
 func TestServicePersistsStableOwnershipRejectionWithoutChangeLog(t *testing.T) {
 	t.Parallel()
 
@@ -540,11 +709,15 @@ type syncScriptedTx struct {
 	rows          []pgx.Row
 	queries       []string
 	args          [][]any
+	execQueries   []string
+	execArgs      [][]any
 	commitCalls   int
 	rollbackCalls int
 }
 
-func (tx *syncScriptedTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (tx *syncScriptedTx) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	tx.execQueries = append(tx.execQueries, query)
+	tx.execArgs = append(tx.execArgs, args)
 	return pgconn.CommandTag{}, nil
 }
 
@@ -622,13 +795,21 @@ func syncOperationRow(identity auth.Identity, operationID uuid.UUID, status stri
 }
 
 func syncProductRow(productID, userID, deviceID uuid.UUID, version int64, deletedAt *time.Time) pgx.Row {
+	return syncProductRowWithBarcode(productID, userID, deviceID, version, deletedAt, "")
+}
+
+func syncProductRowWithBarcode(productID, userID, deviceID uuid.UUID, version int64, deletedAt *time.Time, barcode string) pgx.Row {
 	now := time.Date(2026, time.July, 8, 9, 10, 11, 0, time.UTC)
 	deleted := pgtype.Timestamptz{}
 	if deletedAt != nil {
 		deleted = pgtype.Timestamptz{Time: deletedAt.UTC(), Valid: true}
 	}
+	barcodeValue := pgtype.Text{}
+	if barcode != "" {
+		barcodeValue = pgtype.Text{String: barcode, Valid: true}
+	}
 	return syncStaticRow{values: []any{
-		syncUUIDArg(productID), syncUUIDArg(userID), pgtype.Text{}, pgtype.Text{}, "Test product",
+		syncUUIDArg(productID), syncUUIDArg(userID), barcodeValue, pgtype.Text{}, "Test product",
 		pgtype.Text{}, "pcs", pgtype.Text{}, pgtype.Int4{}, version, now,
 		syncUUIDArg(deviceID), deleted, now,
 	}}

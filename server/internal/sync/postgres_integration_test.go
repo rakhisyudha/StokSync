@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stoksync/stoksync/server/internal/auth"
@@ -297,6 +299,283 @@ VALUES ($1, $2, $3, $4), ($5, $2, $6, $4)`,
 	}
 	if canonical.Name != "Device A product" || canonical.Version != product.Version+1 {
 		t.Fatalf("canonical product = %#v, want device A version %d", canonical, product.Version+1)
+	}
+}
+
+// TestPostgresDeleteWinsAgainstAnAlreadyAcceptedEdit is opt-in. It applies an
+// edit first, then submits a delete based on the older version from another
+// device. The delete must still commit the tombstone, and a later edit must
+// receive the structured canonical deleted state.
+func TestPostgresDeleteWinsAgainstAnAlreadyAcceptedEdit(t *testing.T) {
+	databaseURL := strings.TrimSpace(os.Getenv("STOKSYNC_TEST_DATABASE_URL"))
+	if databaseURL == "" {
+		t.Skip("set STOKSYNC_TEST_DATABASE_URL to run PostgreSQL sync integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, db.PoolConfig{URL: databaseURL, MaxConns: 4, MinConns: 0})
+	if err != nil {
+		t.Fatalf("db.Open() error = %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("database Ping() error = %v", err)
+	}
+
+	userID := uuid.New()
+	editDeviceID := uuid.New()
+	deleteDeviceID := uuid.New()
+	productID := uuid.New()
+	if err := pool.WithTx(ctx, func(q *db.Queries) error {
+		if _, err := q.DB().Exec(ctx, `
+INSERT INTO users (id, email, password_hash)
+VALUES ($1, $2, $3)`, dbUUID(userID), "sync-delete-wins-"+userID.String()+"@example.test", "test-hash"); err != nil {
+			return err
+		}
+		_, err := q.DB().Exec(ctx, `
+INSERT INTO devices (id, user_id, name, platform)
+VALUES ($1, $2, $3, $4), ($5, $2, $6, $4)`,
+			dbUUID(editDeviceID), dbUUID(userID), "delete-wins-edit-device", "test",
+			dbUUID(deleteDeviceID), "delete-wins-delete-device")
+		return err
+	}); err != nil {
+		t.Fatalf("insert integration account/devices: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		_ = pool.WithTx(cleanupCtx, func(q *db.Queries) error {
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM sync_ops WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM change_log WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM product_balances WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM products WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM devices WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			_, err := q.DB().Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, dbUUID(userID))
+			return err
+		})
+	})
+
+	productService, err := products.NewService(pool)
+	if err != nil {
+		t.Fatalf("products.NewService() error = %v", err)
+	}
+	product, err := productService.CreateProduct(ctx, products.CreateProductInput{
+		ID: productID, UserID: userID, Name: "Original product", Unit: "pcs", UpdatedByDeviceID: editDeviceID,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct() error = %v", err)
+	}
+
+	service, err := NewService(pool)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	editOperation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(product.Version),
+		Payload: mustJSON(t, UpsertProductPayload{ID: productID, Name: "Edit before deletion", Unit: "pcs"}),
+	}
+	editResult, err := service.ProcessOperation(ctx, auth.Identity{UserID: userID, DeviceID: editDeviceID}, editOperation)
+	if err != nil || editResult.Status != ResultStatusApplied {
+		t.Fatalf("edit result = %#v, error = %v; want applied edit", editResult, err)
+	}
+
+	deleteOperation := Operation{
+		OpID: uuid.New(), Op: OperationDeleteProduct, BaseVersion: int64Pointer(product.Version),
+		Payload: mustJSON(t, DeleteProductPayload{ID: productID}),
+	}
+	deleteResult, err := service.ProcessOperation(ctx, auth.Identity{UserID: userID, DeviceID: deleteDeviceID}, deleteOperation)
+	if err != nil || deleteResult.Status != ResultStatusApplied {
+		t.Fatalf("delete result = %#v, error = %v; want applied delete-wins tombstone", deleteResult, err)
+	}
+
+	staleEdit := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct, BaseVersion: int64Pointer(product.Version + 1),
+		Payload: mustJSON(t, UpsertProductPayload{ID: productID, Name: "Resurrection attempt", Unit: "pcs"}),
+	}
+	staleResult, err := service.ProcessOperation(ctx, auth.Identity{UserID: userID, DeviceID: editDeviceID}, staleEdit)
+	if err != nil {
+		t.Fatalf("stale edit after tombstone: %v", err)
+	}
+	if staleResult.Status != ResultStatusRejected || staleResult.Reason != ReasonProductDeleted {
+		t.Fatalf("stale edit result = %#v, want product-deleted rejection", staleResult)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(staleResult.ServerState, &state); err != nil {
+		t.Fatalf("decode stale edit canonical state: %v", err)
+	}
+	if state["id"] != productID.String() || state["name"] != "Edit before deletion" || state["deleted_at"] == nil {
+		t.Fatalf("stale edit server state = %#v, want deleted edited product", state)
+	}
+
+	canonical, err := pool.Queries().GetProduct(ctx, userID, productID)
+	if err != nil {
+		t.Fatalf("GetProduct() error = %v", err)
+	}
+	if canonical.Name != "Edit before deletion" || canonical.Version != product.Version+2 || canonical.DeletedAt == nil {
+		t.Fatalf("canonical product = %#v, want deleted version %d retaining edit", canonical, product.Version+2)
+	}
+	changes, err := pool.Queries().ListChangeLog(ctx, db.ListChangeLogParams{UserID: userID, AfterSeq: 0, MaxChanges: 10})
+	if err != nil {
+		t.Fatalf("ListChangeLog() error = %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("change log = %#v, want edit plus tombstone only", changes)
+	}
+}
+
+// TestPostgresDuplicateBarcodeConflictReturnsCanonicalOwner is opt-in. It
+// uses the migrated partial unique index to prove that a concurrent/offline
+// product create becomes a structured, durable conflict rather than a generic
+// transaction failure or a duplicate active barcode.
+func TestPostgresDuplicateBarcodeConflictReturnsCanonicalOwner(t *testing.T) {
+	databaseURL := strings.TrimSpace(os.Getenv("STOKSYNC_TEST_DATABASE_URL"))
+	if databaseURL == "" {
+		t.Skip("set STOKSYNC_TEST_DATABASE_URL to run PostgreSQL sync integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, db.PoolConfig{URL: databaseURL, MaxConns: 4, MinConns: 0})
+	if err != nil {
+		t.Fatalf("db.Open() error = %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("database Ping() error = %v", err)
+	}
+
+	userID := uuid.New()
+	ownerDeviceID := uuid.New()
+	contenderDeviceID := uuid.New()
+	ownerProductID := uuid.New()
+	contenderProductID := uuid.New()
+	if err := pool.WithTx(ctx, func(q *db.Queries) error {
+		if _, err := q.DB().Exec(ctx, `
+INSERT INTO users (id, email, password_hash)
+VALUES ($1, $2, $3)`, dbUUID(userID), "sync-barcode-"+userID.String()+"@example.test", "test-hash"); err != nil {
+			return err
+		}
+		_, err := q.DB().Exec(ctx, `
+INSERT INTO devices (id, user_id, name, platform)
+VALUES ($1, $2, $3, $4), ($5, $2, $6, $4)`,
+			dbUUID(ownerDeviceID), dbUUID(userID), "barcode-device-owner", "test",
+			dbUUID(contenderDeviceID), "barcode-device-contender")
+		return err
+	}); err != nil {
+		t.Fatalf("insert integration account/devices: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		_ = pool.WithTx(cleanupCtx, func(q *db.Queries) error {
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM sync_ops WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM change_log WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM product_balances WHERE product_id IN (SELECT id FROM products WHERE user_id = $1)`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM stock_movements WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM products WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			if _, err := q.DB().Exec(cleanupCtx, `DELETE FROM devices WHERE user_id = $1`, dbUUID(userID)); err != nil {
+				return err
+			}
+			_, err := q.DB().Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, dbUUID(userID))
+			return err
+		})
+	})
+
+	barcode := "offline-shared-barcode"
+	productService, err := products.NewService(pool)
+	if err != nil {
+		t.Fatalf("products.NewService() error = %v", err)
+	}
+	owner, err := productService.CreateProduct(ctx, products.CreateProductInput{
+		ID:                ownerProductID,
+		UserID:            userID,
+		Barcode:           &barcode,
+		Name:              "Canonical owner",
+		Unit:              "pcs",
+		UpdatedByDeviceID: ownerDeviceID,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct() error = %v", err)
+	}
+
+	service, err := NewService(pool)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationUpsertProduct,
+		Payload: mustJSON(t, UpsertProductPayload{
+			ID: contenderProductID, Barcode: &barcode, Name: "Offline contender", Unit: "pcs",
+		}),
+	}
+	identity := auth.Identity{UserID: userID, DeviceID: contenderDeviceID}
+	result, err := service.ProcessOperation(ctx, identity, operation)
+	if err != nil {
+		t.Fatalf("duplicate barcode ProcessOperation() error = %v", err)
+	}
+	assertBarcodeConflictState(t, result, operation.OpID, owner.ID, barcode)
+
+	retryResult, err := service.ProcessOperation(ctx, identity, operation)
+	if err != nil {
+		t.Fatalf("duplicate barcode retry: %v", err)
+	}
+	assertReplayedResultMatches(t, retryResult, result)
+
+	if _, err := pool.Queries().GetProduct(ctx, userID, contenderProductID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("contender product lookup error = %v, want no duplicate product", err)
+	}
+	changes, err := pool.Queries().ListChangeLog(ctx, db.ListChangeLogParams{
+		UserID: userID, AfterSeq: 0, MaxChanges: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListChangeLog() error = %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("change log = %#v, want no change for rejected barcode conflict", changes)
+	}
+	stored, err := pool.Queries().GetSyncOperation(ctx, userID, contenderDeviceID, operation.OpID)
+	if err != nil {
+		t.Fatalf("GetSyncOperation() error = %v", err)
+	}
+	var storedResult OperationResult
+	if err := json.Unmarshal(stored.Response, &storedResult); err != nil {
+		t.Fatalf("decode stored barcode conflict: %v", err)
+	}
+	assertBarcodeConflictState(t, storedResult, operation.OpID, owner.ID, barcode)
+}
+
+func assertBarcodeConflictState(t *testing.T, result OperationResult, operationID, ownerID uuid.UUID, barcode string) {
+	t.Helper()
+	if result.OpID != operationID || result.Status != ResultStatusRejected || result.Reason != ReasonBarcodeConflict {
+		t.Fatalf("result = %#v, want barcode conflict for %s", result, operationID)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(result.ServerState, &state); err != nil {
+		t.Fatalf("decode barcode conflict server state: %v", err)
+	}
+	if state["id"] != ownerID.String() || state["barcode"] != barcode {
+		t.Fatalf("server state = %#v, want owner %s with barcode %q", state, ownerID, barcode)
 	}
 }
 

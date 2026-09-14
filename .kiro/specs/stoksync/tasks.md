@@ -1,4 +1,10 @@
-# StokSync — Implementation Tasks
+# Implementation Plan: StokSync
+
+## StokSync — Implementation Tasks
+
+## Overview
+
+This document is the incremental implementation plan for StokSync, covering the local-first Flutter client, Go/Chi server, synchronization protocol, conflict handling, and quality work. Tasks are grouped by milestone and retain their completion state as implementation progresses.
 
 ## Execution rules
 
@@ -10,7 +16,8 @@
 - Stop after completing the last task of a milestone. Do not start any task from the next milestone in the same run, even if time/context remains.
 - After stopping, write a summary of every file created or modified and every notable decision made since the previous milestone checkpoint. Then tell the user the milestone is ready to commit/push and wait for explicit go-ahead before continuing to the next milestone's tasks.
 
-## Milestone 0 — Foundation
+## Tasks
+
 
 - [x] 0.1 Create the repository layout: `app/`, `server/`, `docs/adr/`, and local-development configuration. Keep the existing `.kiro/specs/stoksync/` files as the authoritative plan.
 - [x] 0.2 Initialize the Flutter application and a separate pure-Dart `sync_engine` package. Add Riverpod, Drift/SQLite, secure storage, connectivity handling, and `mobile_scanner` using pinned compatible versions.
@@ -77,11 +84,11 @@
 
 ## Milestone 5 — Conflicts and resolution UX
 
-- [ ] 5.1 Add canonical product version checks using `base_version` and return structured version-conflict responses with current server state.
-- [ ] 5.2 Implement a three-way field merge for disjoint product edits, producing an explicit merged follow-up operation using the current server version.
-- [ ] 5.3 Implement and test duplicate barcode conflict handling based on the active-barcode unique index.
-- [ ] 5.4 Implement and test delete-wins behavior for edit-versus-tombstone races.
-- [ ] 5.5 Implement stocktake processing that stores `counted_qty` and recomputes its delta against the canonical ledger in the server transaction.
+- [x] 5.1 Add canonical product version checks using `base_version` and return structured version-conflict responses with current server state.
+- [x] 5.2 Implement a three-way field merge for disjoint product edits, producing an explicit merged follow-up operation using the current server version.
+- [x] 5.3 Implement and test duplicate barcode conflict handling based on the active-barcode unique index.
+- [x] 5.4 Implement and test delete-wins behavior for edit-versus-tombstone races.
+- [x] 5.5 Implement stocktake processing that stores `counted_qty` and recomputes its delta against the canonical ledger in the server transaction.
 - [ ] 5.6 Document and implement deterministic treatment of concurrent stocktakes, including an informational or resolvable record for stale/displaced intent.
 - [ ] 5.7 Build the Flutter conflict list/detail/resolution flows showing reason, base/local/server payloads, and the explicit follow-up action.
 - [ ] 5.8 Implement the sync-status chip and detail screen showing state, pending count, conflicts, last successful sync, and error summary.
@@ -108,3 +115,25 @@
 - [ ] V2.4 Evaluate Redis and Asynq only after a demonstrated need for distributed rate limiting, caching, delayed jobs, or higher worker throughput.
 - [ ] V2.5 Add FCM/APNs data-message nudges and opportunistic mobile background sync; retain foreground sync as the correctness baseline.
 - [ ] V2.6 Add partial replication/sync rules only when catalog size or privacy requirements demand it.
+
+## Notes
+
+- `[x]` marks completed implementation tasks; the existing completion state, including tasks 5.1 through 5.5, is preserved.
+- Milestone validations and execution rules remain authoritative for sequencing and handoff.
+- The dependency graph lists incomplete leaf tasks only; milestone headings, validations, and parent tasks are intentionally omitted.
+- Tasks under the deferred v2 backlog remain planning items and are included in the graph for completeness.
+
+## Task Dependency Graph
+
+```json
+{
+  "waves": [
+    { "id": 0, "tasks": ["5.6", "6.1", "V2.1"] },
+    { "id": 1, "tasks": ["5.7", "5.8", "6.2", "V2.2"] },
+    { "id": 2, "tasks": ["5.9", "6.3", "6.4", "V2.3"] },
+    { "id": 3, "tasks": ["6.5", "V2.4"] },
+    { "id": 4, "tasks": ["6.6", "V2.5"] },
+    { "id": 5, "tasks": ["V2.6"] }
+  ]
+}
+```

@@ -112,9 +112,134 @@ void main() {
       expect(await DriftSyncCursorStore(database).readCursor(), 1);
     },
   );
+
+  test(
+    'retains a barcode contender while applying its canonical remote owner',
+    () async {
+      final database = StokSyncDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 9, 13, 10, 2, 14);
+      const localPayload =
+          '{"id":"$_productId","barcode":"shared-barcode","name":"Offline contender","unit":"pcs"}';
+
+      await database
+          .into(database.products)
+          .insert(
+            ProductsCompanion.insert(
+              id: _productId,
+              barcode: const Value('shared-barcode'),
+              name: 'Offline contender',
+              updatedBy: _deviceId,
+              updatedAt: Value(now),
+              createdAt: Value(now),
+              syncStatus: const Value('pending'),
+            ),
+          );
+      await database
+          .into(database.productBalances)
+          .insert(ProductBalancesCompanion.insert(productId: _productId));
+      await database
+          .into(database.pendingOperations)
+          .insert(
+            PendingOperationsCompanion.insert(
+              opId: _operationId,
+              localSeq: 1,
+              entity: 'product',
+              entityId: _productId,
+              operation: 'upsert_product',
+              payload: localPayload,
+              status: const Value('inflight'),
+            ),
+          );
+
+      final pending = PendingSyncOperation(
+        opId: _operationId,
+        localSeq: 1,
+        entity: 'product',
+        entityId: _productId,
+        operation: 'upsert_product',
+        payload: localPayload,
+        baseVersion: null,
+        attempts: 0,
+        nextAttemptAt: now,
+        lastError: null,
+        status: PendingSyncOperationStatus.inflight,
+      );
+      final applier = DriftSyncResponseApplier(
+        responseReconciler: DriftSyncResponseReconciler(
+          database,
+          clock: () => now,
+        ),
+        pageApplier: DriftSyncPageApplier(database),
+      );
+
+      await applier(
+        SyncResponse(
+          results: const [
+            SyncOperationResult(
+              opId: _operationId,
+              status: SyncOperationResultStatus.rejected,
+              reason: 'barcode_conflict',
+              serverState: <String, Object?>{
+                'id': _otherProductId,
+                'barcode': 'shared-barcode',
+                'name': 'Canonical owner',
+                'unit': 'pcs',
+                'version': 1,
+                'deleted_at': null,
+              },
+            ),
+          ],
+          changes: [
+            SyncChangeEntry(
+              seq: 1,
+              entity: 'product',
+              operation: 'upsert',
+              data: <String, Object?>{
+                'id': _otherProductId,
+                'barcode': 'shared-barcode',
+                'sku': null,
+                'name': 'Canonical owner',
+                'description': null,
+                'unit': 'pcs',
+                'category': null,
+                'min_stock': null,
+                'version': 1,
+                'updated_at': now.toIso8601String(),
+                'updated_by_device_id': _deviceId,
+                'deleted_at': null,
+                'created_at': now.toIso8601String(),
+              },
+              createdAt: now,
+            ),
+          ],
+          nextCursor: 1,
+          hasMore: false,
+          serverTime: now,
+        ),
+        [pending],
+      );
+
+      final products = await database.select(database.products).get();
+      expect(products, hasLength(2));
+      final contender = products.singleWhere((row) => row.id == _productId);
+      expect(contender.barcode, 'shared-barcode');
+      expect(contender.syncStatus, 'conflict');
+      final owner = products.singleWhere((row) => row.id == _otherProductId);
+      expect(owner.barcode, 'shared-barcode');
+      expect(owner.syncStatus, 'synced');
+      expect(
+        (await database.select(database.pendingOperations).get()).single.status,
+        'blocked',
+      );
+      expect(await database.select(database.conflicts).get(), hasLength(1));
+      expect(await DriftSyncCursorStore(database).readCursor(), 1);
+    },
+  );
 }
 
 const _deviceId = '0192f200-0000-7000-8000-000000000001';
 const _productId = '0192e1aa-0000-7000-8000-000000000001';
+const _otherProductId = '0192e1aa-0000-7000-8000-000000000002';
 const _operationId = '0192f3a1-0000-7000-8000-000000000001';
 const _payload = '{"id":"$_productId","name":"Local product"}';

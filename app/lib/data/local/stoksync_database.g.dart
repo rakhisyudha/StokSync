@@ -1969,6 +1969,17 @@ class $PendingOperationsTable extends PendingOperations
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _basePayloadMeta = const VerificationMeta(
+    'basePayload',
+  );
+  @override
+  late final GeneratedColumn<String> basePayload = GeneratedColumn<String>(
+    'base_payload',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _baseVersionMeta = const VerificationMeta(
     'baseVersion',
   );
@@ -2034,6 +2045,7 @@ class $PendingOperationsTable extends PendingOperations
     entityId,
     operation,
     payload,
+    basePayload,
     baseVersion,
     attempts,
     nextAttemptAt,
@@ -2099,6 +2111,15 @@ class $PendingOperationsTable extends PendingOperations
       );
     } else if (isInserting) {
       context.missing(_payloadMeta);
+    }
+    if (data.containsKey('base_payload')) {
+      context.handle(
+        _basePayloadMeta,
+        basePayload.isAcceptableOrUnknown(
+          data['base_payload']!,
+          _basePayloadMeta,
+        ),
+      );
     }
     if (data.containsKey('base_version')) {
       context.handle(
@@ -2169,6 +2190,10 @@ class $PendingOperationsTable extends PendingOperations
         DriftSqlType.string,
         data['${effectivePrefix}payload'],
       )!,
+      basePayload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}base_payload'],
+      ),
       baseVersion: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}base_version'],
@@ -2206,6 +2231,7 @@ class PendingOperation extends DataClass
   final String entityId;
   final String operation;
   final String payload;
+  final String? basePayload;
   final int? baseVersion;
   final int attempts;
   final DateTime nextAttemptAt;
@@ -2218,6 +2244,7 @@ class PendingOperation extends DataClass
     required this.entityId,
     required this.operation,
     required this.payload,
+    this.basePayload,
     this.baseVersion,
     required this.attempts,
     required this.nextAttemptAt,
@@ -2233,6 +2260,9 @@ class PendingOperation extends DataClass
     map['entity_id'] = Variable<String>(entityId);
     map['op'] = Variable<String>(operation);
     map['payload'] = Variable<String>(payload);
+    if (!nullToAbsent || basePayload != null) {
+      map['base_payload'] = Variable<String>(basePayload);
+    }
     if (!nullToAbsent || baseVersion != null) {
       map['base_version'] = Variable<int>(baseVersion);
     }
@@ -2253,6 +2283,9 @@ class PendingOperation extends DataClass
       entityId: Value(entityId),
       operation: Value(operation),
       payload: Value(payload),
+      basePayload: basePayload == null && nullToAbsent
+          ? const Value.absent()
+          : Value(basePayload),
       baseVersion: baseVersion == null && nullToAbsent
           ? const Value.absent()
           : Value(baseVersion),
@@ -2277,6 +2310,7 @@ class PendingOperation extends DataClass
       entityId: serializer.fromJson<String>(json['entityId']),
       operation: serializer.fromJson<String>(json['operation']),
       payload: serializer.fromJson<String>(json['payload']),
+      basePayload: serializer.fromJson<String?>(json['basePayload']),
       baseVersion: serializer.fromJson<int?>(json['baseVersion']),
       attempts: serializer.fromJson<int>(json['attempts']),
       nextAttemptAt: serializer.fromJson<DateTime>(json['nextAttemptAt']),
@@ -2294,6 +2328,7 @@ class PendingOperation extends DataClass
       'entityId': serializer.toJson<String>(entityId),
       'operation': serializer.toJson<String>(operation),
       'payload': serializer.toJson<String>(payload),
+      'basePayload': serializer.toJson<String?>(basePayload),
       'baseVersion': serializer.toJson<int?>(baseVersion),
       'attempts': serializer.toJson<int>(attempts),
       'nextAttemptAt': serializer.toJson<DateTime>(nextAttemptAt),
@@ -2309,6 +2344,7 @@ class PendingOperation extends DataClass
     String? entityId,
     String? operation,
     String? payload,
+    Value<String?> basePayload = const Value.absent(),
     Value<int?> baseVersion = const Value.absent(),
     int? attempts,
     DateTime? nextAttemptAt,
@@ -2321,6 +2357,7 @@ class PendingOperation extends DataClass
     entityId: entityId ?? this.entityId,
     operation: operation ?? this.operation,
     payload: payload ?? this.payload,
+    basePayload: basePayload.present ? basePayload.value : this.basePayload,
     baseVersion: baseVersion.present ? baseVersion.value : this.baseVersion,
     attempts: attempts ?? this.attempts,
     nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
@@ -2335,6 +2372,9 @@ class PendingOperation extends DataClass
       entityId: data.entityId.present ? data.entityId.value : this.entityId,
       operation: data.operation.present ? data.operation.value : this.operation,
       payload: data.payload.present ? data.payload.value : this.payload,
+      basePayload: data.basePayload.present
+          ? data.basePayload.value
+          : this.basePayload,
       baseVersion: data.baseVersion.present
           ? data.baseVersion.value
           : this.baseVersion,
@@ -2356,6 +2396,7 @@ class PendingOperation extends DataClass
           ..write('entityId: $entityId, ')
           ..write('operation: $operation, ')
           ..write('payload: $payload, ')
+          ..write('basePayload: $basePayload, ')
           ..write('baseVersion: $baseVersion, ')
           ..write('attempts: $attempts, ')
           ..write('nextAttemptAt: $nextAttemptAt, ')
@@ -2373,6 +2414,7 @@ class PendingOperation extends DataClass
     entityId,
     operation,
     payload,
+    basePayload,
     baseVersion,
     attempts,
     nextAttemptAt,
@@ -2389,6 +2431,7 @@ class PendingOperation extends DataClass
           other.entityId == this.entityId &&
           other.operation == this.operation &&
           other.payload == this.payload &&
+          other.basePayload == this.basePayload &&
           other.baseVersion == this.baseVersion &&
           other.attempts == this.attempts &&
           other.nextAttemptAt == this.nextAttemptAt &&
@@ -2403,6 +2446,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
   final Value<String> entityId;
   final Value<String> operation;
   final Value<String> payload;
+  final Value<String?> basePayload;
   final Value<int?> baseVersion;
   final Value<int> attempts;
   final Value<DateTime> nextAttemptAt;
@@ -2416,6 +2460,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     this.entityId = const Value.absent(),
     this.operation = const Value.absent(),
     this.payload = const Value.absent(),
+    this.basePayload = const Value.absent(),
     this.baseVersion = const Value.absent(),
     this.attempts = const Value.absent(),
     this.nextAttemptAt = const Value.absent(),
@@ -2430,6 +2475,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     required String entityId,
     required String operation,
     required String payload,
+    this.basePayload = const Value.absent(),
     this.baseVersion = const Value.absent(),
     this.attempts = const Value.absent(),
     this.nextAttemptAt = const Value.absent(),
@@ -2449,6 +2495,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     Expression<String>? entityId,
     Expression<String>? operation,
     Expression<String>? payload,
+    Expression<String>? basePayload,
     Expression<int>? baseVersion,
     Expression<int>? attempts,
     Expression<DateTime>? nextAttemptAt,
@@ -2463,6 +2510,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
       if (entityId != null) 'entity_id': entityId,
       if (operation != null) 'op': operation,
       if (payload != null) 'payload': payload,
+      if (basePayload != null) 'base_payload': basePayload,
       if (baseVersion != null) 'base_version': baseVersion,
       if (attempts != null) 'attempts': attempts,
       if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
@@ -2479,6 +2527,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     Value<String>? entityId,
     Value<String>? operation,
     Value<String>? payload,
+    Value<String?>? basePayload,
     Value<int?>? baseVersion,
     Value<int>? attempts,
     Value<DateTime>? nextAttemptAt,
@@ -2493,6 +2542,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
       entityId: entityId ?? this.entityId,
       operation: operation ?? this.operation,
       payload: payload ?? this.payload,
+      basePayload: basePayload ?? this.basePayload,
       baseVersion: baseVersion ?? this.baseVersion,
       attempts: attempts ?? this.attempts,
       nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
@@ -2522,6 +2572,9 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     }
     if (payload.present) {
       map['payload'] = Variable<String>(payload.value);
+    }
+    if (basePayload.present) {
+      map['base_payload'] = Variable<String>(basePayload.value);
     }
     if (baseVersion.present) {
       map['base_version'] = Variable<int>(baseVersion.value);
@@ -2553,6 +2606,7 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
           ..write('entityId: $entityId, ')
           ..write('operation: $operation, ')
           ..write('payload: $payload, ')
+          ..write('basePayload: $basePayload, ')
           ..write('baseVersion: $baseVersion, ')
           ..write('attempts: $attempts, ')
           ..write('nextAttemptAt: $nextAttemptAt, ')
@@ -5128,6 +5182,7 @@ typedef $$PendingOperationsTableCreateCompanionBuilder =
       required String entityId,
       required String operation,
       required String payload,
+      Value<String?> basePayload,
       Value<int?> baseVersion,
       Value<int> attempts,
       Value<DateTime> nextAttemptAt,
@@ -5143,6 +5198,7 @@ typedef $$PendingOperationsTableUpdateCompanionBuilder =
       Value<String> entityId,
       Value<String> operation,
       Value<String> payload,
+      Value<String?> basePayload,
       Value<int?> baseVersion,
       Value<int> attempts,
       Value<DateTime> nextAttemptAt,
@@ -5187,6 +5243,11 @@ class $$PendingOperationsTableFilterComposer
 
   ColumnFilters<String> get payload => $composableBuilder(
     column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get basePayload => $composableBuilder(
+    column: $table.basePayload,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5255,6 +5316,11 @@ class $$PendingOperationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get basePayload => $composableBuilder(
+    column: $table.basePayload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get baseVersion => $composableBuilder(
     column: $table.baseVersion,
     builder: (column) => ColumnOrderings(column),
@@ -5307,6 +5373,11 @@ class $$PendingOperationsTableAnnotationComposer
 
   GeneratedColumn<String> get payload =>
       $composableBuilder(column: $table.payload, builder: (column) => column);
+
+  GeneratedColumn<String> get basePayload => $composableBuilder(
+    column: $table.basePayload,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get baseVersion => $composableBuilder(
     column: $table.baseVersion,
@@ -5374,6 +5445,7 @@ class $$PendingOperationsTableTableManager
                 Value<String> entityId = const Value.absent(),
                 Value<String> operation = const Value.absent(),
                 Value<String> payload = const Value.absent(),
+                Value<String?> basePayload = const Value.absent(),
                 Value<int?> baseVersion = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime> nextAttemptAt = const Value.absent(),
@@ -5387,6 +5459,7 @@ class $$PendingOperationsTableTableManager
                 entityId: entityId,
                 operation: operation,
                 payload: payload,
+                basePayload: basePayload,
                 baseVersion: baseVersion,
                 attempts: attempts,
                 nextAttemptAt: nextAttemptAt,
@@ -5402,6 +5475,7 @@ class $$PendingOperationsTableTableManager
                 required String entityId,
                 required String operation,
                 required String payload,
+                Value<String?> basePayload = const Value.absent(),
                 Value<int?> baseVersion = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime> nextAttemptAt = const Value.absent(),
@@ -5415,6 +5489,7 @@ class $$PendingOperationsTableTableManager
                 entityId: entityId,
                 operation: operation,
                 payload: payload,
+                basePayload: basePayload,
                 baseVersion: baseVersion,
                 attempts: attempts,
                 nextAttemptAt: nextAttemptAt,

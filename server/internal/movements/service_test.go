@@ -115,6 +115,57 @@ func TestAppendMovementCommitsAfterLedgerAndProjectionUpdate(t *testing.T) {
 	}
 }
 
+func TestAppendStocktakeRecomputesDeltaFromCanonicalLedger(t *testing.T) {
+	userID := uuid.New()
+	productID := uuid.New()
+	deviceID := uuid.New()
+	movementID := uuid.New()
+	occurredAt := time.Date(2026, time.February, 2, 3, 4, 5, 0, time.UTC)
+	countedQty := int32(5)
+	beginner := &scriptedBeginner{tx: &scriptedTx{rows: []pgx.Row{
+		productRow(productID, userID, deviceID),
+		staticRow{values: []any{
+			int64(9),
+			pgtype.Timestamptz{Time: occurredAt, Valid: true},
+		}},
+		movementRowWithCounted(
+			movementID,
+			userID,
+			productID,
+			deviceID,
+			-4,
+			"stocktake",
+			occurredAt,
+			countedQty,
+		),
+		balanceRow(productID, 5, occurredAt),
+	}}}
+	service, err := NewService(beginner)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	movement, err := service.AppendMovement(context.Background(), AppendInput{
+		ID:         movementID,
+		UserID:     userID,
+		ProductID:  productID,
+		DeviceID:   deviceID,
+		Delta:      123, // Client intent is not canonical for stocktakes.
+		Kind:       "stocktake",
+		CountedQty: &countedQty,
+		OccurredAt: occurredAt,
+	})
+	if err != nil {
+		t.Fatalf("AppendMovement() error = %v", err)
+	}
+	if movement.Delta != -4 || movement.CountedQty == nil || *movement.CountedQty != countedQty {
+		t.Fatalf("movement = %#v, want canonical delta -4 and counted quantity %d", movement, countedQty)
+	}
+	if beginner.tx.commitCalls != 1 || beginner.tx.rollbackCalls != 0 {
+		t.Fatalf("transaction calls = (commit %d, rollback %d), want (1, 0)", beginner.tx.commitCalls, beginner.tx.rollbackCalls)
+	}
+}
+
 func TestCompareBalancesDetectsCorruptedProjection(t *testing.T) {
 	productID := uuid.New()
 	occurredAt := time.Date(2026, time.March, 3, 4, 5, 6, 0, time.UTC)
@@ -249,6 +300,15 @@ func movementRow(movementID, userID, productID, deviceID uuid.UUID, delta int32,
 	return staticRow{values: []any{
 		uuidArg(movementID), uuidArg(userID), uuidArg(productID), delta, kind,
 		pgtype.Text{}, occurredAt, occurredAt, int64(0), pgtype.Int4{}, pgtype.UUID{},
+		uuidArg(deviceID), occurredAt.Add(time.Minute),
+	}}
+}
+
+func movementRowWithCounted(movementID, userID, productID, deviceID uuid.UUID, delta int32, kind string, occurredAt time.Time, countedQty int32) pgx.Row {
+	return staticRow{values: []any{
+		uuidArg(movementID), uuidArg(userID), uuidArg(productID), delta, kind,
+		pgtype.Text{}, occurredAt, occurredAt, int64(0),
+		pgtype.Int4{Int32: countedQty, Valid: true}, pgtype.UUID{},
 		uuidArg(deviceID), occurredAt.Add(time.Minute),
 	}}
 }

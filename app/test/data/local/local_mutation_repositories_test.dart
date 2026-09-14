@@ -45,6 +45,7 @@ void main() {
         expect(product.name, 'Indomie Goreng Special');
         expect(product.barcode, isNull);
         expect(product.deletedAt!.toUtc(), harness.now);
+        expect(product.version, 3);
         expect(product.syncStatus, 'pending');
 
         final balance = await _balanceByProduct(
@@ -61,8 +62,28 @@ void main() {
           'upsert_product',
           'delete_product',
         ]);
-        expect(operations[1].baseVersion, 0);
-        expect(operations[2].baseVersion, 0);
+        expect(operations[1].baseVersion, 1);
+        expect(operations[2].baseVersion, 2);
+        expect(jsonDecode(operations[1].basePayload!), {
+          'id': created.productId,
+          'barcode': '089686010947',
+          'sku': 'INDO-01',
+          'name': 'Indomie Goreng',
+          'description': 'Noodles',
+          'unit': 'pcs',
+          'category': 'Food',
+          'min_stock': 24,
+        });
+        expect(jsonDecode(operations[2].basePayload!), {
+          'id': created.productId,
+          'barcode': null,
+          'sku': null,
+          'name': 'Indomie Goreng Special',
+          'description': null,
+          'unit': 'pack',
+          'category': null,
+          'min_stock': 12,
+        });
         expect(jsonDecode(operations[0].payload), {
           'id': created.productId,
           'barcode': '089686010947',

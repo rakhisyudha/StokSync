@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -129,6 +131,102 @@ void main() {
     );
 
     test(
+      'applies a canonical tombstone for a rejected edit without dropping audit intent',
+      () async {
+        final harness = _ReconciliationHarness();
+        addTearDown(harness.close);
+        final pending = await harness.seedProductOperation(
+          baseVersion: 1,
+          payload: _productPayload,
+        );
+        final deletedAt = DateTime.utc(2026, 9, 13, 10, 4);
+        final canonical = <String, Object?>{
+          'id': _productId,
+          'barcode': null,
+          'sku': null,
+          'name': 'Canonical deleted product',
+          'description': null,
+          'unit': 'pcs',
+          'category': null,
+          'min_stock': null,
+          'version': 2,
+          'updated_at': deletedAt.toIso8601String(),
+          'updated_by_device_id': _deviceId,
+          'deleted_at': deletedAt.toIso8601String(),
+          'created_at': harness.now.toIso8601String(),
+        };
+
+        await harness.reconciler.reconcile(
+          harness.response(
+            result: SyncOperationResult(
+              opId: _operationId,
+              status: SyncOperationResultStatus.rejected,
+              reason: 'product_deleted',
+              serverState: canonical,
+            ),
+          ),
+          [pending],
+        );
+
+        final product = await harness.product();
+        expect(product.name, 'Canonical deleted product');
+        expect(product.version, 2);
+        expect(product.deletedAt?.toUtc(), deletedAt);
+        expect(product.syncStatus, 'conflict');
+        final queueRow = (await harness.pending()).single;
+        expect(queueRow.status, 'blocked');
+        expect(queueRow.lastError, 'product_deleted');
+        final conflict = (await harness.conflicts()).single;
+        expect(conflict.reason, 'product_deleted');
+        expect(conflict.resolutionStatus, 'unresolved');
+        expect(conflict.localPayload, _productPayload);
+        expect(conflict.serverPayload, contains('Canonical deleted product'));
+      },
+    );
+
+    test(
+      'replaces a stale local stocktake delta with the canonical delta and repairs its projection',
+      () async {
+        final harness = _ReconciliationHarness();
+        addTearDown(harness.close);
+        final pending = await harness.seedStaleStocktakeOperation();
+
+        await harness.reconciler.reconcile(
+          harness.response(
+            result: const SyncOperationResult(
+              opId: _operationId,
+              status: SyncOperationResultStatus.applied,
+              seq: 13,
+            ),
+            changes: [
+              SyncChangeEntry(
+                seq: 13,
+                entity: 'stock_movement',
+                operation: 'upsert',
+                data: <String, Object?>{
+                  'id': _movementId,
+                  'product_id': _productId,
+                  'delta': -6,
+                  'kind': 'stocktake',
+                  'counted_qty': 5,
+                },
+              ),
+            ],
+          ),
+          [pending],
+        );
+
+        final movement = await harness.movement();
+        expect(movement.delta, -6);
+        expect(movement.countedQty, 5);
+        expect(movement.syncStatus, 'synced');
+        final balance = await harness.balance();
+        expect(balance.qty, 5);
+        expect(await harness.pending(), isEmpty);
+      },
+    );
+
+    test(
       'persists canonical movement metadata before deleting its queue row',
       () async {
         final harness = _ReconciliationHarness();
@@ -205,6 +303,148 @@ void main() {
     );
 
     test(
+      'retains local intent and canonical owner for a duplicate barcode conflict',
+      () async {
+        final harness = _ReconciliationHarness();
+        addTearDown(harness.close);
+        final localPayload = jsonEncode(<String, Object?>{
+          'id': _productId,
+          'barcode': 'shared-barcode',
+          'name': 'Offline contender',
+          'unit': 'pcs',
+        });
+        final pending = await harness.seedProductOperation(
+          payload: localPayload,
+          productBarcode: 'shared-barcode',
+        );
+
+        await harness.reconciler.reconcile(
+          harness.response(
+            result: const SyncOperationResult(
+              opId: _operationId,
+              status: SyncOperationResultStatus.rejected,
+              reason: 'barcode_conflict',
+              serverState: <String, Object?>{
+                'id': _otherProductId,
+                'barcode': 'shared-barcode',
+                'name': 'Canonical owner',
+                'unit': 'pcs',
+                'version': 1,
+                'deleted_at': null,
+              },
+            ),
+          ),
+          [pending],
+        );
+
+        final queueRow = (await harness.pending()).single;
+        expect(queueRow.status, 'blocked');
+        expect(queueRow.payload, localPayload);
+        expect(queueRow.lastError, 'barcode_conflict');
+        final conflict = (await harness.conflicts()).single;
+        expect(conflict.reason, 'barcode_conflict');
+        expect(conflict.resolutionStatus, 'unresolved');
+        expect(jsonDecode(conflict.localPayload), jsonDecode(localPayload));
+        expect(jsonDecode(conflict.serverPayload!), {
+          'id': _otherProductId,
+          'barcode': 'shared-barcode',
+          'name': 'Canonical owner',
+          'unit': 'pcs',
+          'version': 1,
+          'deleted_at': null,
+        });
+        final product = await harness.product();
+        expect(product.barcode, 'shared-barcode');
+        expect(product.name, 'Local product');
+        expect(product.syncStatus, 'conflict');
+      },
+    );
+
+    test(
+      'auto-merges disjoint product fields into a current-version follow-up',
+      () async {
+        final harness = _ReconciliationHarness();
+        addTearDown(harness.close);
+        final pending = await harness.seedProductOperation(
+          baseVersion: 1,
+          payload: jsonEncode(_localProduct),
+          basePayload: jsonEncode(_baseProduct),
+        );
+
+        await harness.reconciler.reconcile(
+          harness.response(
+            result: const SyncOperationResult(
+              opId: _operationId,
+              status: SyncOperationResultStatus.rejected,
+              reason: 'version_conflict',
+              serverState: _serverProduct,
+            ),
+          ),
+          [pending],
+        );
+
+        final operations = await harness.pending();
+        expect(operations, hasLength(2));
+        final original = operations.singleWhere(
+          (operation) => operation.opId == _operationId,
+        );
+        final followUp = operations.singleWhere(
+          (operation) => operation.opId != _operationId,
+        );
+        expect(original.status, 'blocked');
+        expect(followUp.status, 'queued');
+        expect(followUp.operation, 'upsert_product');
+        expect(followUp.baseVersion, 2);
+        expect(jsonDecode(followUp.payload), {
+          ..._localProduct,
+          'min_stock': 12,
+        });
+        expect(jsonDecode(followUp.basePayload!), _serverEditableProduct);
+
+        final conflict = (await harness.conflicts()).single;
+        expect(conflict.resolutionStatus, 'auto_merged');
+        expect(jsonDecode(conflict.basePayload!), _baseProduct);
+        expect(jsonDecode(conflict.localPayload), _localProduct);
+        expect(jsonDecode(conflict.serverPayload!), _serverProduct);
+        final product = await harness.product();
+        expect(product.name, 'Local name');
+        expect(product.minStock, 12);
+        expect(product.version, 3);
+        expect(product.syncStatus, 'pending');
+      },
+    );
+
+    test('keeps overlapping product edits as an unresolved conflict', () async {
+      final harness = _ReconciliationHarness();
+      addTearDown(harness.close);
+      final pending = await harness.seedProductOperation(
+        baseVersion: 1,
+        payload: jsonEncode(_localProduct),
+        basePayload: jsonEncode(_baseProduct),
+      );
+      final server = <String, Object?>{..._serverProduct, 'name': 'Other name'};
+
+      await harness.reconciler.reconcile(
+        harness.response(
+          result: SyncOperationResult(
+            opId: _operationId,
+            status: SyncOperationResultStatus.rejected,
+            reason: 'version_conflict',
+            serverState: server,
+          ),
+        ),
+        [pending],
+      );
+
+      final operations = await harness.pending();
+      expect(operations, hasLength(1));
+      expect(operations.single.status, 'blocked');
+      final conflict = (await harness.conflicts()).single;
+      expect(conflict.resolutionStatus, 'unresolved');
+      expect((await harness.product()).syncStatus, 'conflict');
+    });
+
+    test(
       'rolls back consequence and queue deletion when canonical persistence fails',
       () async {
         final harness = _ReconciliationHarness();
@@ -260,8 +500,56 @@ const _deviceId = '0192f200-0000-7000-8000-000000000001';
 const _productId = '0192e1aa-0000-7000-8000-000000000001';
 const _otherProductId = '0192e1aa-0000-7000-8000-000000000002';
 const _movementId = '0192e1aa-0000-7000-8000-000000000003';
+const _baseMovementId = '0192e1aa-0000-7000-8000-000000000004';
+const _remoteMovementId = '0192e1aa-0000-7000-8000-000000000005';
 const _operationId = '0192f3a1-0000-7000-8000-000000000001';
 const _productPayload = '{"id":"$_productId","name":"Local product"}';
+
+const Map<String, Object?> _baseProduct = <String, Object?>{
+  'id': _productId,
+  'barcode': 'base-barcode',
+  'sku': 'base-sku',
+  'name': 'Base name',
+  'description': 'Base description',
+  'unit': 'pcs',
+  'category': 'base-category',
+  'min_stock': 5,
+};
+
+const Map<String, Object?> _localProduct = <String, Object?>{
+  'id': _productId,
+  'barcode': 'base-barcode',
+  'sku': 'base-sku',
+  'name': 'Local name',
+  'description': 'Base description',
+  'unit': 'pcs',
+  'category': 'base-category',
+  'min_stock': 5,
+};
+
+const Map<String, Object?> _serverProduct = <String, Object?>{
+  'id': _productId,
+  'barcode': 'base-barcode',
+  'sku': 'base-sku',
+  'name': 'Base name',
+  'description': 'Base description',
+  'unit': 'pcs',
+  'category': 'base-category',
+  'min_stock': 12,
+  'version': 2,
+  'deleted_at': null,
+};
+
+const Map<String, Object?> _serverEditableProduct = <String, Object?>{
+  'id': _productId,
+  'barcode': 'base-barcode',
+  'sku': 'base-sku',
+  'name': 'Base name',
+  'description': 'Base description',
+  'unit': 'pcs',
+  'category': 'base-category',
+  'min_stock': 12,
+};
 
 final class _ReconciliationHarness {
   _ReconciliationHarness()
@@ -276,12 +564,16 @@ final class _ReconciliationHarness {
   Future<PendingSyncOperation> seedProductOperation({
     int? baseVersion,
     String operation = 'upsert_product',
+    String payload = _productPayload,
+    String? basePayload,
+    String? productBarcode,
   }) async {
     await database
         .into(database.products)
         .insert(
           ProductsCompanion.insert(
             id: _productId,
+            barcode: Value(productBarcode),
             name: 'Local product',
             updatedBy: _deviceId,
             updatedAt: Value(now),
@@ -297,12 +589,106 @@ final class _ReconciliationHarness {
       entityId: _productId,
       operation: operation,
       baseVersion: baseVersion,
+      payload: payload,
+      basePayload: basePayload,
     );
     return _pendingOperation(
       entity: 'product',
       entityId: _productId,
       operation: operation,
       baseVersion: baseVersion,
+      payload: payload,
+    );
+  }
+
+  Future<PendingSyncOperation> seedStaleStocktakeOperation() async {
+    await database
+        .into(database.products)
+        .insert(
+          ProductsCompanion.insert(
+            id: _productId,
+            name: 'Local product',
+            updatedBy: _deviceId,
+            updatedAt: Value(now),
+            createdAt: Value(now),
+          ),
+        );
+    await database
+        .into(database.productBalances)
+        .insert(
+          ProductBalancesCompanion.insert(
+            productId: _productId,
+            qty: const Value(9),
+          ),
+        );
+    await database
+        .into(database.stockMovements)
+        .insert(
+          StockMovementsCompanion.insert(
+            id: _baseMovementId,
+            productId: _productId,
+            delta: 7,
+            kind: 'receive',
+            occurredAt: now,
+            rawOccurredAt: now,
+            deviceId: _deviceId,
+            syncStatus: const Value('synced'),
+          ),
+        );
+    await database
+        .into(database.stockMovements)
+        .insert(
+          StockMovementsCompanion.insert(
+            id: _remoteMovementId,
+            productId: _productId,
+            delta: 4,
+            kind: 'receive',
+            occurredAt: now,
+            rawOccurredAt: now,
+            deviceId: _deviceId,
+            syncStatus: const Value('synced'),
+          ),
+        );
+    await database
+        .into(database.stockMovements)
+        .insert(
+          StockMovementsCompanion.insert(
+            id: _movementId,
+            productId: _productId,
+            delta: -2,
+            kind: 'stocktake',
+            countedQty: const Value(5),
+            occurredAt: now,
+            rawOccurredAt: now,
+            deviceId: _deviceId,
+            syncStatus: const Value('pending'),
+          ),
+        );
+    await _insertPending(
+      entity: 'stock_movement',
+      entityId: _movementId,
+      operation: 'add_movement',
+      payload: jsonEncode(<String, Object?>{
+        'id': _movementId,
+        'product_id': _productId,
+        'delta': -2,
+        'kind': 'stocktake',
+        'occurred_at': now.toIso8601String(),
+        'counted_qty': 5,
+      }),
+    );
+    return _pendingOperation(
+      entity: 'stock_movement',
+      entityId: _movementId,
+      operation: 'add_movement',
+      payload: jsonEncode(<String, Object?>{
+        'id': _movementId,
+        'product_id': _productId,
+        'delta': -2,
+        'kind': 'stocktake',
+        'occurred_at': now.toIso8601String(),
+        'counted_qty': 5,
+      }),
     );
   }
 
@@ -373,6 +759,10 @@ final class _ReconciliationHarness {
     database.stockMovements,
   )..where((row) => row.id.equals(_movementId))).getSingle();
 
+  Future<ProductBalance> balance() => (database.select(
+    database.productBalances,
+  )..where((row) => row.productId.equals(_productId))).getSingle();
+
   Future<List<PendingOperation>> pending() =>
       database.select(database.pendingOperations).get();
 
@@ -383,6 +773,8 @@ final class _ReconciliationHarness {
     required String entity,
     required String entityId,
     required String operation,
+    String payload = _productPayload,
+    String? basePayload,
     int? baseVersion,
   }) {
     return database
@@ -394,7 +786,8 @@ final class _ReconciliationHarness {
             entity: entity,
             entityId: entityId,
             operation: operation,
-            payload: _productPayload,
+            payload: payload,
+            basePayload: Value(basePayload),
             baseVersion: Value(baseVersion),
             status: const Value('inflight'),
           ),
@@ -405,6 +798,7 @@ final class _ReconciliationHarness {
     required String entity,
     required String entityId,
     required String operation,
+    String payload = _productPayload,
     int? baseVersion,
   }) {
     return PendingSyncOperation(
@@ -413,7 +807,7 @@ final class _ReconciliationHarness {
       entity: entity,
       entityId: entityId,
       operation: operation,
-      payload: _productPayload,
+      payload: payload,
       baseVersion: baseVersion,
       attempts: 0,
       nextAttemptAt: now,

@@ -75,6 +75,41 @@ void main() {
     });
 
     test(
+      'lets a canonical tombstone override a higher optimistic local version',
+      () async {
+        final harness = _ApplierHarness();
+        addTearDown(harness.close);
+        await harness.seedProduct(status: 'pending');
+        await (harness.database.update(
+          harness.database.products,
+        )..where((row) => row.id.equals(_productId))).write(
+          const ProductsCompanion(
+            name: Value('Optimistic local edit'),
+            version: Value(7),
+          ),
+        );
+
+        final deletedAt = harness.now.add(const Duration(minutes: 3));
+        await harness.applier.applyChange(
+          harness.productChange(
+            version: 2,
+            name: 'Canonical deleted product',
+            operation: 'delete',
+            deletedAt: deletedAt,
+          ),
+        );
+
+        final product = await harness.database
+            .select(harness.database.products)
+            .getSingle();
+        expect(product.name, 'Canonical deleted product');
+        expect(product.version, 2);
+        expect(product.deletedAt?.toUtc(), deletedAt);
+        expect(product.syncStatus, 'pending');
+      },
+    );
+
+    test(
       'preserves local pending and conflict intent while applying a tombstone',
       () async {
         final harness = _ApplierHarness();

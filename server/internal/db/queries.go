@@ -40,6 +40,15 @@ SELECT
 FROM products
 WHERE id = $1`
 
+	getActiveProductByBarcodeSQL = `
+SELECT
+    id, user_id, barcode, sku, name, description, unit, category, min_stock,
+    version, updated_at, updated_by_device_id, deleted_at, created_at
+FROM products
+WHERE user_id = $1 AND barcode = $2 AND deleted_at IS NULL
+ORDER BY id
+LIMIT 1`
+
 	getProductForUpdateSQL = `
 SELECT
     id, user_id, barcode, sku, name, description, unit, category, min_stock,
@@ -88,7 +97,7 @@ SET deleted_at = CURRENT_TIMESTAMP,
     version = version + 1,
     updated_at = CURRENT_TIMESTAMP,
     updated_by_device_id = $4
-WHERE user_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL
+WHERE user_id = $1 AND id = $2 AND version >= $3 AND deleted_at IS NULL
 RETURNING
     id, user_id, barcode, sku, name, description, unit, category, min_stock,
     version, updated_at, updated_by_device_id, deleted_at, created_at`
@@ -319,6 +328,14 @@ func (q *Queries) GetProductByID(ctx context.Context, productID uuid.UUID) (Prod
 	return scanProduct(q.db.QueryRow(ctx, getProductByIDSQL, uuidArg(productID)))
 }
 
+// GetActiveProductByBarcode returns the active product that owns barcode in
+// the requested account. The PostgreSQL partial unique index makes the result
+// deterministic; ORDER BY keeps the read stable if a legacy database has not
+// yet applied the index migration.
+func (q *Queries) GetActiveProductByBarcode(ctx context.Context, userID uuid.UUID, barcode string) (Product, error) {
+	return scanProduct(q.db.QueryRow(ctx, getActiveProductByBarcodeSQL, uuidArg(userID), barcode))
+}
+
 // GetProductForUpdate returns an active product in the user's account while
 // taking a row lock. Movement and stocktake transactions use this lock to
 // serialize canonical ledger calculations with other service mutations.
@@ -397,8 +414,11 @@ func (q *Queries) UpdateProduct(ctx context.Context, params UpdateProductParams)
 	))
 }
 
-// SoftDeleteProduct creates a product tombstone with a version check. It never
-// removes the row or its historical movements.
+// SoftDeleteProduct creates a product tombstone using delete-wins semantics.
+// A positive base version greater than the current version is rejected by the
+// predicate, but an older base is allowed to tombstone an active product so an
+// edit that raced with the deletion cannot become canonical. It never removes
+// the row or its historical movements.
 func (q *Queries) SoftDeleteProduct(ctx context.Context, params SoftDeleteProductParams) (Product, error) {
 	return scanProduct(q.db.QueryRow(ctx, softDeleteProductSQL,
 		uuidArg(params.UserID),

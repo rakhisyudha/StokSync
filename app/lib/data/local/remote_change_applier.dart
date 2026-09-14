@@ -207,14 +207,20 @@ final class DriftRemoteChangeApplier {
       deletedAt = change.createdAt?.toUtc() ?? serverTime;
     }
 
-    if (existing != null && existing.deletedAt != null && deletedAt == null) {
+    final incomingIsDeleted = deletedAt != null;
+    if (existing != null && existing.deletedAt != null && !incomingIsDeleted) {
       // A tombstoned product never comes back through a stale or malformed
       // upsert. A future explicit resurrection policy would need a separate
       // operation and conflict rules; v1 has delete-wins semantics.
       return;
     }
 
-    if (existing != null && hasVersion) {
+    // A canonical tombstone outranks an optimistic local version. The local
+    // row may have advanced beyond the server version while its edit is still
+    // queued, so normal version ordering must not discard the deletion.
+    final incomingTombstoneOverridesActive =
+        existing != null && existing.deletedAt == null && incomingIsDeleted;
+    if (existing != null && hasVersion && !incomingTombstoneOverridesActive) {
       if (version < existing.version) {
         // An old feed page can be replayed after a newer page. Never let it
         // resurrect or overwrite a canonical row that is already newer.
@@ -659,7 +665,10 @@ final class DriftRemoteChangeApplier {
     }
     final activeRows =
         await (_database.select(_database.products)..where(
-              (row) => row.barcode.equals(barcode) & row.deletedAt.isNull(),
+              (row) =>
+                  row.barcode.equals(barcode) &
+                  row.deletedAt.isNull() &
+                  row.syncStatus.equals('conflict').not(),
             ))
             .get();
     if (activeRows.any((row) => row.id != id)) {

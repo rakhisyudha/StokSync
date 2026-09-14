@@ -39,7 +39,13 @@ var (
 	ErrDeletedProduct         = ErrProductDeleted
 )
 
-const defaultUnit = "pcs"
+const (
+	// ActiveBarcodeUniqueIndex is the PostgreSQL partial unique index that
+	// rejects duplicate barcodes among non-deleted products.
+	ActiveBarcodeUniqueIndex = "products_active_barcode_uq"
+
+	defaultUnit = "pcs"
+)
 
 // Service owns canonical product mutations. It accepts the transaction
 // beginner interface rather than a concrete pool so transaction behavior can
@@ -65,7 +71,9 @@ type CreateProductInput = db.CreateProductParams
 // UpdateProductInput is a complete version-checked product edit.
 type UpdateProductInput = db.UpdateProductParams
 
-// SoftDeleteProductInput identifies a version-checked tombstone operation.
+// SoftDeleteProductInput identifies a delete-wins tombstone operation. The
+// base version must be positive; an older active version is intentionally
+// accepted so a concurrent edit cannot outrank a deletion.
 type SoftDeleteProductInput = db.SoftDeleteProductParams
 
 // CreateInput, UpdateInput, and DeleteInput are concise service-facing names.
@@ -292,7 +300,7 @@ func mapMutationError(err error) error {
 		return err
 	}
 	switch pgErr.ConstraintName {
-	case "products_active_barcode_uq":
+	case ActiveBarcodeUniqueIndex:
 		return ErrBarcodeConflict
 	case "products_updated_by_device_id_fkey", "products_updated_by_device_owner_fkey", "products_user_id_fkey":
 		return ErrOwnershipViolation
