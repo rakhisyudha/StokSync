@@ -21,6 +21,11 @@ server/coverage.out
 .env
 .env.*
 !.env.example
+!.env.prod.example
+
+# Kiro spec task tracking (local progress state, not shared history)
+.kiro/specs/stoksync/tasks.md
+.kiro/specs/stoksync/tasks.meta.json
 
 # IDE and operating system files
 .idea/

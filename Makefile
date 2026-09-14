@@ -56,3 +56,12 @@ analyze: client-analyze server-analyze ## Run client and server static analysis.
 test: client-test server-test ## Run client and server tests.
 
 verify: client-deps format-check analyze test ## Run all formatting, analysis, and test checks.
+
+docker-build: ## Build the production API image locally without starting it.
+	docker build -t stoksync-api:local -f $(SERVER_DIR)/Dockerfile $(SERVER_DIR)
+
+docker-up: ## Start the production-style stack (Postgres + migrate + API) using .env.prod.
+	docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+
+docker-down: ## Stop the production-style stack started by docker-up.
+	docker compose --env-file .env.prod -f docker-compose.prod.yml down

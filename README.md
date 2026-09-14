@@ -346,4 +346,5 @@ For an automated version of the two-replica scenario, use the [live authenticate
 - [PostgreSQL migrations](server/migrations/README.md)
 - [Database access and transaction recipe](server/internal/db/README.md)
 - [Architecture decision records](docs/adr/)
+- [VPS deployment and Android release](docs/deployment.md)
 - [Requirements](.kiro/specs/stoksync/requirements.md) and [design](.kiro/specs/stoksync/design.md)

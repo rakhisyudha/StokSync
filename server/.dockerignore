@@ -1,0 +1,9 @@
+# Keep the Docker build context limited to what the Go build actually needs.
+.env
+.env.*
+!.env.example
+bin/
+coverage.out
+migrations/testdata/
+*.md
+.git/

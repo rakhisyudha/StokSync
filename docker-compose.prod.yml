@@ -1,0 +1,83 @@
+name: stoksync
+
+# Production/VPS composition. This is intentionally separate from
+# docker-compose.yml (the local development file, which only runs a bare
+# PostgreSQL instance and the one-shot migration runner while the API is run
+# directly on the host with `go run ./cmd/api`). This file also builds and
+# runs the API itself as a container, so a VPS only needs Docker installed.
+#
+# PostgreSQL is not published to the host here: only the API port is exposed,
+# so the database is reachable only from other containers on the
+# stoksync-internal network. Put a TLS-terminating reverse proxy in front of
+# the API port for any real deployment; see docs/deployment.md.
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - stoksync-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - stoksync-internal
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./server/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      - up
+    networks:
+      - stoksync-internal
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      STOKSYNC_ENV: production
+      STOKSYNC_HTTP_ADDR: ":8080"
+      STOKSYNC_SHUTDOWN_TIMEOUT: ${STOKSYNC_SHUTDOWN_TIMEOUT:-10s}
+      STOKSYNC_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      STOKSYNC_DATABASE_MAX_CONNS: ${STOKSYNC_DATABASE_MAX_CONNS:-10}
+      STOKSYNC_DATABASE_MIN_CONNS: ${STOKSYNC_DATABASE_MIN_CONNS:-2}
+      STOKSYNC_DATABASE_MAX_CONN_LIFETIME: ${STOKSYNC_DATABASE_MAX_CONN_LIFETIME:-1h}
+      STOKSYNC_DATABASE_MAX_CONN_IDLE_TIME: ${STOKSYNC_DATABASE_MAX_CONN_IDLE_TIME:-30m}
+      STOKSYNC_DATABASE_HEALTH_CHECK_PERIOD: ${STOKSYNC_DATABASE_HEALTH_CHECK_PERIOD:-1m}
+      STOKSYNC_AUTH_ACCESS_TOKEN_SECRET: ${STOKSYNC_AUTH_ACCESS_TOKEN_SECRET}
+      STOKSYNC_AUTH_ACCESS_TOKEN_TTL: ${STOKSYNC_AUTH_ACCESS_TOKEN_TTL:-15m}
+      STOKSYNC_AUTH_REFRESH_TOKEN_TTL: ${STOKSYNC_AUTH_REFRESH_TOKEN_TTL:-2160h}
+      STOKSYNC_AUTH_TOKEN_ISSUER: ${STOKSYNC_AUTH_TOKEN_ISSUER:-stoksync-api}
+      STOKSYNC_AUTH_TOKEN_AUDIENCE: ${STOKSYNC_AUTH_TOKEN_AUDIENCE:-stoksync-client}
+      STOKSYNC_AUTH_BCRYPT_COST: ${STOKSYNC_AUTH_BCRYPT_COST:-12}
+    ports:
+      - "${STOKSYNC_API_PORT:-8080}:8080"
+    networks:
+      - stoksync-internal
+
+volumes:
+  stoksync-postgres-data:
+
+networks:
+  stoksync-internal:
