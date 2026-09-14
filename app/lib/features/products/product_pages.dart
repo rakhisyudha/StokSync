@@ -5,6 +5,7 @@ import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
 import '../movements/movement_pages.dart';
+import '../sync/conflict_pages.dart';
 import '../sync/sync_status_widgets.dart';
 import 'barcode_scanner_page.dart';
 import 'product_providers.dart';
@@ -32,7 +33,19 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
     final products = ref.watch(activeProductsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Products')),
+      appBar: AppBar(
+        title: const Text('Products'),
+        actions: [
+          IconButton(
+            key: const Key('conflicts-button'),
+            tooltip: 'Conflicts',
+            icon: const Icon(Icons.warning_amber_outlined),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const ConflictListPage()),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,

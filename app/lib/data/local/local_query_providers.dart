@@ -46,6 +46,20 @@ final lowStockProductsProvider =
       return ref.watch(localInventoryQueriesProvider).watchLowStockProducts();
     });
 
+/// Reactively exposes all retained conflicts, newest first. Resolved rows stay
+/// visible so the user can inspect the original intent and chosen action.
+final conflictsProvider = StreamProvider.autoDispose<List<Conflict>>((ref) {
+  return ref.watch(localInventoryQueriesProvider).watchConflicts();
+});
+
+/// Reactively exposes one retained conflict by its original operation id.
+final conflictDetailProvider = StreamProvider.autoDispose
+    .family<Conflict?, String>((ref, operationId) {
+      return ref
+          .watch(localInventoryQueriesProvider)
+          .watchConflict(operationId);
+    });
+
 /// Reactively exposes local synchronization metadata and outstanding counts.
 final syncSummaryProvider = StreamProvider.autoDispose<SyncSummary>((ref) {
   return ref.watch(localInventoryQueriesProvider).watchSyncSummary();
@@ -103,6 +117,21 @@ final class LocalInventoryQueries {
           .where((item) => item.quantity <= item.product.minStock!)
           .toList(growable: false),
     );
+  }
+
+  Stream<List<Conflict>> watchConflicts() {
+    final query = _database.select(_database.conflicts)
+      ..orderBy([
+        (conflict) => OrderingTerm.desc(conflict.createdAt),
+        (conflict) => OrderingTerm.desc(conflict.opId),
+      ]);
+    return query.watch();
+  }
+
+  Stream<Conflict?> watchConflict(String operationId) {
+    return (_database.select(_database.conflicts)
+          ..where((conflict) => conflict.opId.equals(operationId)))
+        .watchSingleOrNull();
   }
 
   Stream<SyncSummary> watchSyncSummary() {
