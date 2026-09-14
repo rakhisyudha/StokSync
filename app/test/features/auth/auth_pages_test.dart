@@ -13,14 +13,7 @@ void main() {
     tester,
   ) async {
     final store = _MemorySessionStore();
-    final controller = AuthSessionController(
-      client: HttpAuthClient(
-        baseUri: Uri.parse('https://example.test'),
-        sender: _LoginSender(),
-        now: () => DateTime.utc(2026, 9, 13, 10, 2, 14),
-      ),
-      sessionStore: store,
-    );
+    final controller = _controller(store: store, sender: _LoginSender());
 
     await tester.pumpWidget(
       MaterialApp(
@@ -34,21 +27,108 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('login-email-field')), findsOneWidget);
-    await tester.enterText(
-      find.byKey(const Key('login-email-field')),
-      'owner@example.test',
-    );
-    await tester.enterText(
-      find.byKey(const Key('login-password-field')),
-      'password',
-    );
+    await _enterLoginCredentials(tester);
     await tester.tap(find.byKey(const Key('login-submit-button')));
     await tester.pumpAndSettle();
 
     expect(find.text('Inventory'), findsOneWidget);
     expect(store.session?.accessToken, 'access-token');
   });
+
+  testWidgets(
+    'registration validates confirmation and opens the app with its stored session',
+    (tester) async {
+      final store = _MemorySessionStore();
+      final sender = _RecordingSender(_successResponse(statusCode: 201));
+      final controller = _controller(store: store, sender: sender);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildStokSyncTheme(Brightness.light),
+          home: AuthenticatedSessionGate(
+            sessionStore: store,
+            controller: controller,
+            deviceId: _deviceId,
+            deviceName: 'Pixel 8a',
+            platform: 'android',
+            authenticatedChild: const Text('Inventory'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final createAccountLink = find.byKey(
+        const Key('login-create-account-link'),
+      );
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+      await tester.tap(createAccountLink);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('register-title')), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('register-email-field')),
+        'new.owner@example.test',
+      );
+      await tester.enterText(
+        find.byKey(const Key('register-password-field')),
+        'password',
+      );
+      await tester.enterText(
+        find.byKey(const Key('register-confirm-password-field')),
+        'different',
+      );
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -250));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('register-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Passwords do not match.'), findsOneWidget);
+      expect(sender.uri, isNull);
+
+      await tester.enterText(
+        find.byKey(const Key('register-confirm-password-field')),
+        'password',
+      );
+      await tester.tap(find.byKey(const Key('register-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(sender.uri, Uri.parse('https://example.test/v1/auth/register'));
+      expect(find.text('Inventory'), findsOneWidget);
+      expect(store.session?.accessToken, 'access-token');
+    },
+  );
+
+  testWidgets(
+    'registration page returns to sign in through its account prompt',
+    (tester) async {
+      var signInTapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildStokSyncTheme(Brightness.light),
+          home: RegistrationPage(
+            controller: _controller(
+              store: _MemorySessionStore(),
+              sender: _LoginSender(),
+            ),
+            deviceId: _deviceId,
+            onRegistered: (_) {},
+            onSignIn: () => signInTapped = true,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      final signInLink = find.byKey(const Key('register-sign-in-link'));
+      await tester.scrollUntilVisible(
+        signInLink,
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(signInLink);
+      expect(signInTapped, isTrue);
+    },
+  );
 
   testWidgets('login page presents the themed hierarchy and input actions', (
     tester,
@@ -60,7 +140,7 @@ void main() {
     expect(find.text('Welcome back'), findsOneWidget);
     expect(find.text('you@example.com'), findsOneWidget);
     expect(find.byIcon(Icons.alternate_email), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline), findsWidgets);
 
     final emailField = tester.widget<TextField>(
       find.descendant(
@@ -89,28 +169,34 @@ void main() {
     expect(button.child, isA<AnimatedSwitcher>());
   });
 
-  testWidgets('login page keeps the hierarchy readable in dark mode', (
-    tester,
-  ) async {
-    await _pumpLoginPage(
-      tester,
-      sender: _LoginSender(),
-      brightness: Brightness.dark,
-    );
+  testWidgets(
+    'login page keeps headers and editable text readable in dark mode',
+    (tester) async {
+      await _pumpLoginPage(
+        tester,
+        sender: _LoginSender(),
+        brightness: Brightness.dark,
+      );
 
-    final title = tester.widget<Text>(find.byKey(const Key('login-title')));
-    expect(
-      title.style?.color,
-      buildStokSyncTheme(Brightness.dark).colorScheme.onSurface,
-    );
-  });
+      final theme = buildStokSyncTheme(Brightness.dark);
+      final title = tester.widget<Text>(find.byKey(const Key('login-title')));
+      final emailField = tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(const Key('login-email-field')),
+          matching: find.byType(TextField),
+        ),
+      );
+      expect(title.style?.color, theme.colorScheme.onSurface);
+      expect(emailField.style?.color, theme.colorScheme.onSurface);
+    },
+  );
 
   testWidgets('login page exposes a themed loading state while signing in', (
     tester,
   ) async {
     final sender = _BlockingSender();
     await _pumpLoginPage(tester, sender: sender);
-    await _enterCredentials(tester);
+    await _enterLoginCredentials(tester);
 
     await tester.tap(find.byKey(const Key('login-submit-button')));
     await tester.pump();
@@ -123,7 +209,7 @@ void main() {
     );
     expect(button.onPressed, isNull);
 
-    sender.response.complete(_successResponse());
+    sender.response.complete(_successResponse(statusCode: 200));
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsOneWidget);
   });
@@ -132,7 +218,7 @@ void main() {
     'login page renders authentication errors in an accessible banner',
     (tester) async {
       await _pumpLoginPage(tester, sender: _InvalidCredentialsSender());
-      await _enterCredentials(tester);
+      await _enterLoginCredentials(tester);
 
       await tester.tap(find.byKey(const Key('login-submit-button')));
       await tester.pumpAndSettle();
@@ -151,13 +237,11 @@ void main() {
 
 const _deviceId = '0192f200-0000-7000-8000-000000000002';
 
-Future<void> _pumpLoginPage(
-  WidgetTester tester, {
+AuthSessionController _controller({
+  required SyncSessionStore store,
   required SyncHttpRequestSender sender,
-  Brightness brightness = Brightness.light,
-}) async {
-  final store = _MemorySessionStore();
-  final controller = AuthSessionController(
+}) {
+  return AuthSessionController(
     client: HttpAuthClient(
       baseUri: Uri.parse('https://example.test'),
       sender: sender,
@@ -165,12 +249,18 @@ Future<void> _pumpLoginPage(
     ),
     sessionStore: store,
   );
+}
 
+Future<void> _pumpLoginPage(
+  WidgetTester tester, {
+  required SyncHttpRequestSender sender,
+  Brightness brightness = Brightness.light,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: buildStokSyncTheme(brightness),
       home: LoginPage(
-        controller: controller,
+        controller: _controller(store: _MemorySessionStore(), sender: sender),
         deviceId: _deviceId,
         onLoggedIn: (_) {},
       ),
@@ -179,7 +269,7 @@ Future<void> _pumpLoginPage(
   await tester.pumpAndSettle();
 }
 
-Future<void> _enterCredentials(WidgetTester tester) async {
+Future<void> _enterLoginCredentials(WidgetTester tester) async {
   await tester.enterText(
     find.byKey(const Key('login-email-field')),
     'owner@example.test',
@@ -190,9 +280,9 @@ Future<void> _enterCredentials(WidgetTester tester) async {
   );
 }
 
-SyncHttpResponse _successResponse() {
+SyncHttpResponse _successResponse({required int statusCode}) {
   return SyncHttpResponse(
-    statusCode: 200,
+    statusCode: statusCode,
     body: utf8.encode(
       jsonEncode(<String, Object?>{
         'access_token': 'access-token',
@@ -235,6 +325,24 @@ final class _InvalidCredentialsSender implements SyncHttpRequestSender {
   }
 }
 
+final class _RecordingSender implements SyncHttpRequestSender {
+  _RecordingSender(this.response);
+
+  final SyncHttpResponse response;
+  Uri? uri;
+
+  @override
+  Future<SyncHttpResponse> send({
+    required String method,
+    required Uri uri,
+    required Map<String, String> headers,
+    required List<int> body,
+  }) async {
+    this.uri = uri;
+    return response;
+  }
+}
+
 final class _MemorySessionStore implements SyncSessionStore {
   SyncSession? session;
 
@@ -255,18 +363,6 @@ final class _LoginSender implements SyncHttpRequestSender {
     required Map<String, String> headers,
     required List<int> body,
   }) async {
-    return SyncHttpResponse(
-      statusCode: 200,
-      body: utf8.encode(
-        jsonEncode(<String, Object?>{
-          'access_token': 'access-token',
-          'token_type': 'Bearer',
-          'expires_in': 900,
-          'refresh_token': 'refresh-token',
-          'user_id': '0192f200-0000-7000-8000-000000000001',
-          'device_id': _deviceId,
-        }),
-      ),
-    );
+    return _successResponse(statusCode: 200);
   }
 }

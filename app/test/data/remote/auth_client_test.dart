@@ -9,21 +9,7 @@ void main() {
   group('HttpAuthClient', () {
     test('posts login credentials and decodes the returned session', () async {
       final diagnosticLines = <String>[];
-      final sender = _RecordingSender(
-        SyncHttpResponse(
-          statusCode: 200,
-          body: utf8.encode(
-            jsonEncode(<String, Object?>{
-              'access_token': 'access-token',
-              'token_type': 'Bearer',
-              'expires_in': 900,
-              'refresh_token': 'refresh-token',
-              'user_id': '0192f200-0000-7000-8000-000000000001',
-              'device_id': '0192f200-0000-7000-8000-000000000002',
-            }),
-          ),
-        ),
-      );
+      final sender = _RecordingSender(_successResponse(statusCode: 200));
       final client = HttpAuthClient(
         baseUri: Uri.parse(
           'https://example.test/api/v1/sync?secret=must-not-be-retained',
@@ -36,7 +22,7 @@ void main() {
       final session = await client.login(
         email: 'owner@example.test',
         password: 'correct horse battery staple',
-        deviceId: '0192f200-0000-7000-8000-000000000002',
+        deviceId: _deviceId,
         deviceName: 'Test phone',
         platform: 'android',
       );
@@ -51,7 +37,7 @@ void main() {
       expect(jsonDecode(utf8.decode(sender.body!)), <String, String>{
         'email': 'owner@example.test',
         'password': 'correct horse battery staple',
-        'device_id': '0192f200-0000-7000-8000-000000000002',
+        'device_id': _deviceId,
         'device_name': 'Test phone',
         'platform': 'android',
       });
@@ -66,6 +52,46 @@ void main() {
       expect(diagnosticLines.single, isNot(contains('access-token')));
       expect(diagnosticLines.single, isNot(contains('refresh-token')));
     });
+
+    test(
+      'posts registration credentials and decodes a created session',
+      () async {
+        final diagnosticLines = <String>[];
+        final sender = _RecordingSender(_successResponse(statusCode: 201));
+        final client = HttpAuthClient(
+          baseUri: Uri.parse('https://example.test/v1/auth/login'),
+          sender: sender,
+          diagnostics: AppDiagnostics(writer: diagnosticLines.add),
+          now: () => DateTime.utc(2026, 9, 13, 10, 2, 14),
+        );
+
+        final session = await client.register(
+          email: 'new.owner@example.test',
+          password: 'correct horse battery staple',
+          deviceId: _deviceId,
+          deviceName: 'Test phone',
+          platform: 'android',
+        );
+
+        expect(
+          client.registerEndpoint,
+          Uri.parse('https://example.test/v1/auth/register'),
+        );
+        expect(sender.method, 'POST');
+        expect(sender.uri, client.registerEndpoint);
+        expect(jsonDecode(utf8.decode(sender.body!)), <String, String>{
+          'email': 'new.owner@example.test',
+          'password': 'correct horse battery staple',
+          'device_id': _deviceId,
+          'device_name': 'Test phone',
+          'platform': 'android',
+        });
+        expect(session.accessToken, 'access-token');
+        expect(diagnosticLines.single, contains('"event":"auth.register"'));
+        expect(diagnosticLines.single, isNot(contains('correct horse')));
+        expect(diagnosticLines.single, isNot(contains('access-token')));
+      },
+    );
 
     test(
       'maps a server credential rejection without exposing response data',
@@ -87,7 +113,7 @@ void main() {
           client.login(
             email: 'owner@example.test',
             password: 'wrong',
-            deviceId: '0192f200-0000-7000-8000-000000000002',
+            deviceId: _deviceId,
           ),
           throwsA(
             isA<AuthClientException>()
@@ -110,38 +136,70 @@ void main() {
   test(
     'AuthSessionController stores only after a successful login response',
     () async {
-      final sender = _RecordingSender(
-        SyncHttpResponse(
-          statusCode: 200,
-          body: utf8.encode(
-            jsonEncode(<String, Object?>{
-              'access_token': 'access-token',
-              'token_type': 'Bearer',
-              'expires_in': 900,
-              'refresh_token': 'refresh-token',
-              'user_id': '0192f200-0000-7000-8000-000000000001',
-              'device_id': '0192f200-0000-7000-8000-000000000002',
-            }),
-          ),
-        ),
-      );
       final store = _MemorySessionStore();
-      final controller = AuthSessionController(
-        client: HttpAuthClient(
-          baseUri: Uri.parse('https://example.test'),
-          sender: sender,
-        ),
-        sessionStore: store,
+      final controller = _controllerFor(
+        store: store,
+        sender: _RecordingSender(_successResponse(statusCode: 200)),
       );
 
       final session = await controller.login(
         email: 'owner@example.test',
         password: 'password',
-        deviceId: '0192f200-0000-7000-8000-000000000002',
+        deviceId: _deviceId,
       );
 
       expect(store.session, same(session));
     },
+  );
+
+  test(
+    'AuthSessionController stores only after a successful registration response',
+    () async {
+      final store = _MemorySessionStore();
+      final controller = _controllerFor(
+        store: store,
+        sender: _RecordingSender(_successResponse(statusCode: 201)),
+      );
+
+      final session = await controller.register(
+        email: 'new.owner@example.test',
+        password: 'password',
+        deviceId: _deviceId,
+      );
+
+      expect(store.session, same(session));
+    },
+  );
+}
+
+const _deviceId = '0192f200-0000-7000-8000-000000000002';
+
+AuthSessionController _controllerFor({
+  required _MemorySessionStore store,
+  required SyncHttpRequestSender sender,
+}) {
+  return AuthSessionController(
+    client: HttpAuthClient(
+      baseUri: Uri.parse('https://example.test'),
+      sender: sender,
+    ),
+    sessionStore: store,
+  );
+}
+
+SyncHttpResponse _successResponse({required int statusCode}) {
+  return SyncHttpResponse(
+    statusCode: statusCode,
+    body: utf8.encode(
+      jsonEncode(<String, Object?>{
+        'access_token': 'access-token',
+        'token_type': 'Bearer',
+        'expires_in': 900,
+        'refresh_token': 'refresh-token',
+        'user_id': '0192f200-0000-7000-8000-000000000001',
+        'device_id': _deviceId,
+      }),
+    ),
   );
 }
 
