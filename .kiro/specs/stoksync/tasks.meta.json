@@ -689,6 +689,21 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394644
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348676881
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348690524
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789349431604
       }
     ],
     "5.7 Build the Flutter conflict list/detail/resolution flows showing reason, base/local/server payloads, and the explicit follow-up action.": [
@@ -713,6 +728,21 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394723
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348676981
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789349451782
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789349801195
       }
     ],
     "5.9 Add automated scenarios for every row in the documented conflict matrix.": [
@@ -720,6 +750,21 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394763
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677041
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789349808993
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789350077929
       }
     ],
     "6.1 Add Drift migration tests and server migration-upgrade tests from representative previous schemas.": [
@@ -727,6 +772,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394802
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677110
       }
     ],
     "6.2 Expand the convergence harness with dropped requests/responses, duplicates, reordering, timeouts, retries, and random operation sequences; assert eventual convergence and ledger-derived balances.": [
@@ -734,6 +784,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394842
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677170
       }
     ],
     "6.3 Add client/server structured logging and safe diagnostics, excluding credentials and tokens.": [
@@ -741,6 +796,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394881
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677233
       }
     ],
     "6.4 Complete README documentation: local setup, architecture diagram, data model, protocol overview, test commands, known v1 limits, and two-device demonstration steps.": [
@@ -748,6 +808,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394919
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677290
       }
     ],
     "6.5 Record ADRs for idempotency, cursor allocation, conflict behavior, stocktake policy, and foreground-first sync constraints.": [
@@ -755,6 +820,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394959
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677349
       }
     ],
     "6.6 Manually validate the demo on two physical phones or emulators: scan, offline operations, restart persistence, convergence, and conflict resolution.": [
@@ -762,6 +832,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295394998
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677412
       }
     ],
     "V2.1 Introduce multi-tenant ownership (`tenant_id`), tenant-scoped unique indexes, authorization, and PostgreSQL row-level security.": [
@@ -769,6 +844,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395040
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677476
       }
     ],
     "V2.2 Add shared organizations, roles, invitations, and multi-user audit attribution.": [
@@ -776,6 +856,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395078
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677533
       }
     ],
     "V2.3 Add a Postgres-backed worker queue for genuine asynchronous jobs using transactionally enqueued jobs and `FOR UPDATE SKIP LOCKED`.": [
@@ -783,6 +868,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395141
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677591
       }
     ],
     "V2.4 Evaluate Redis and Asynq only after a demonstrated need for distributed rate limiting, caching, delayed jobs, or higher worker throughput.": [
@@ -790,6 +880,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395181
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677724
       }
     ],
     "V2.5 Add FCM/APNs data-message nudges and opportunistic mobile background sync; retain foreground sync as the correctness baseline.": [
@@ -797,6 +892,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395218
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677782
       }
     ],
     "V2.6 Add partial replication/sync rules only when catalog size or privacy requirements demand it.": [
@@ -804,6 +904,11 @@
         "executionId": "552c8da6-276f-4ff7-8d7a-b164824c1f9d",
         "chatSessionId": "sess_4b577c05-b345-4b5c-ad39-72431de0dca6",
         "timestamp": 1789295395263
+      },
+      {
+        "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789348677835
       }
     ]
   }

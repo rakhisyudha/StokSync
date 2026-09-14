@@ -197,6 +197,36 @@ void main() {
               opId: _operationId,
               status: SyncOperationResultStatus.applied,
               seq: 13,
+              stocktakeOutcome: <String, Object?>{
+                'product_id': _productId,
+                'canonical_balance': 5,
+                'canonical': <String, Object?>{
+                  'movement_id': _movementId,
+                  'product_id': _productId,
+                  'delta': -6,
+                  'counted_qty': 5,
+                  'occurred_at': '2026-09-13T10:02:14.000Z',
+                  'device_id': _deviceId,
+                },
+                'incoming': <String, Object?>{
+                  'movement_id': _movementId,
+                  'product_id': _productId,
+                  'delta': -6,
+                  'counted_qty': 5,
+                  'occurred_at': '2026-09-13T10:02:14.000Z',
+                  'device_id': _deviceId,
+                },
+                'displaced': <Object?>[
+                  <String, Object?>{
+                    'movement_id': _baseMovementId,
+                    'product_id': _productId,
+                    'delta': 2,
+                    'counted_qty': 11,
+                    'occurred_at': '2026-09-13T10:02:14.000Z',
+                    'device_id': _deviceId,
+                  },
+                ],
+              },
             ),
             changes: [
               SyncChangeEntry(
@@ -209,6 +239,36 @@ void main() {
                   'delta': -6,
                   'kind': 'stocktake',
                   'counted_qty': 5,
+                  'stocktake_outcome': <String, Object?>{
+                    'product_id': _productId,
+                    'canonical_balance': 5,
+                    'canonical': <String, Object?>{
+                      'movement_id': _movementId,
+                      'product_id': _productId,
+                      'delta': -6,
+                      'counted_qty': 5,
+                      'occurred_at': '2026-09-13T10:02:14.000Z',
+                      'device_id': _deviceId,
+                    },
+                    'incoming': <String, Object?>{
+                      'movement_id': _movementId,
+                      'product_id': _productId,
+                      'delta': -6,
+                      'counted_qty': 5,
+                      'occurred_at': '2026-09-13T10:02:14.000Z',
+                      'device_id': _deviceId,
+                    },
+                    'displaced': <Object?>[
+                      <String, Object?>{
+                        'movement_id': _baseMovementId,
+                        'product_id': _productId,
+                        'delta': 2,
+                        'counted_qty': 11,
+                        'occurred_at': '2026-09-13T10:02:14.000Z',
+                        'device_id': _deviceId,
+                      },
+                    ],
+                  },
                 },
               ),
             ],
@@ -222,6 +282,16 @@ void main() {
         expect(movement.syncStatus, 'synced');
         final balance = await harness.balance();
         expect(balance.qty, 5);
+        final conflicts = await harness.conflicts();
+        expect(conflicts, hasLength(1));
+        expect(conflicts.single.entity, 'stock_movement');
+        expect(conflicts.single.entityId, _baseMovementId);
+        expect(conflicts.single.reason, 'stocktake_displaced');
+        expect(conflicts.single.resolutionStatus, 'unresolved');
+        expect(
+          jsonDecode(conflicts.single.serverPayload!),
+          containsPair('canonical_balance', 5),
+        );
         expect(await harness.pending(), isEmpty);
       },
     );

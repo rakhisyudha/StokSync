@@ -515,15 +515,39 @@ func isJSONObject(raw []byte) bool {
 	return json.Unmarshal(raw, &fields) == nil && fields != nil
 }
 
+// StocktakeIntent is the wire representation of one immutable stocktake
+// intent used to explain deterministic winner selection and displacement.
+type StocktakeIntent struct {
+	MovementID uuid.UUID `json:"movement_id"`
+	ProductID  uuid.UUID `json:"product_id"`
+	Delta      int32     `json:"delta"`
+	CountedQty int32     `json:"counted_qty"`
+	OccurredAt time.Time `json:"occurred_at"`
+	DeviceID   uuid.UUID `json:"device_id"`
+}
+
+// StocktakeOutcome is returned for both accepted and displaced stocktakes.
+// Accepted outcomes may list the immediately preceding intent that was
+// displaced; rejected outcomes identify the canonical winner and preserve the
+// incoming stale intent for client conflict history.
+type StocktakeOutcome struct {
+	ProductID        uuid.UUID         `json:"product_id"`
+	CanonicalBalance int64             `json:"canonical_balance"`
+	Canonical        StocktakeIntent   `json:"canonical"`
+	Incoming         StocktakeIntent   `json:"incoming"`
+	Displaced        []StocktakeIntent `json:"displaced,omitempty"`
+}
+
 // OperationResult records one independent operation outcome. Applied results
 // carry the canonical change sequence; rejected results carry a stable reason
 // and may include the canonical server state for conflict inspection.
 type OperationResult struct {
-	OpID        uuid.UUID       `json:"op_id"`
-	Status      string          `json:"status"`
-	Seq         *int64          `json:"seq,omitempty"`
-	Reason      string          `json:"reason,omitempty"`
-	ServerState json.RawMessage `json:"server_state,omitempty"`
+	OpID             uuid.UUID         `json:"op_id"`
+	Status           string            `json:"status"`
+	Seq              *int64            `json:"seq,omitempty"`
+	Reason           string            `json:"reason,omitempty"`
+	ServerState      json.RawMessage   `json:"server_state,omitempty"`
+	StocktakeOutcome *StocktakeOutcome `json:"stocktake_outcome,omitempty"`
 }
 
 // ChangeEntry is one ordered canonical change-feed entry returned after push.

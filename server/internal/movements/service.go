@@ -107,6 +107,45 @@ type StocktakeInput struct {
 	ClockOffsetMs int64
 }
 
+// StocktakeIntent is the immutable, auditable portion of a stocktake used to
+// explain deterministic winner selection to clients.
+type StocktakeIntent struct {
+	MovementID uuid.UUID
+	ProductID  uuid.UUID
+	Delta      int32
+	CountedQty int32
+	OccurredAt time.Time
+	DeviceID   uuid.UUID
+}
+
+// StocktakeResolution describes the canonical stocktake decision made while
+// the product row is locked. Displaced contains the immediately preceding
+// canonical intent when the incoming ordering key advances; older displaced
+// intents were already reported with their own transition.
+type StocktakeResolution struct {
+	ProductID        uuid.UUID
+	CanonicalBalance int64
+	Canonical        StocktakeIntent
+	Incoming         StocktakeIntent
+	Displaced        []StocktakeIntent
+}
+
+// StocktakeDisplacedError is a committed semantic rejection. Its structured
+// resolution is returned in the operation result so the client can retain the
+// stale intent instead of treating it as an unexplained validation failure.
+type StocktakeDisplacedError struct {
+	Resolution StocktakeResolution
+}
+
+func (e *StocktakeDisplacedError) Error() string {
+	return "stocktake was displaced by a canonical stocktake"
+}
+
+func (e *StocktakeDisplacedError) Is(target error) bool {
+	_, ok := target.(*StocktakeDisplacedError)
+	return ok
+}
+
 // ProjectionMismatch describes a difference between a ledger-derived balance
 // and its stored read projection. A nil ActualQty means the projection row is
 // missing; ExpectedQty and ActualQty are always based on the same product.
@@ -152,14 +191,22 @@ func (s *Service) AppendMovement(ctx context.Context, input AppendInput) (db.Sto
 // bound to an outer transaction. Synchronization uses this method so the
 // ledger, balance projection, change log, and operation outcome commit as one.
 func (s *Service) AppendMovementInTransaction(ctx context.Context, queries *db.Queries, input AppendInput) (db.StockMovement, error) {
+	movement, _, err := s.AppendMovementInTransactionWithResolution(ctx, queries, input)
+	return movement, err
+}
+
+// AppendMovementInTransactionWithResolution applies the deterministic
+// stocktake ordering policy and returns the structured decision used by the
+// synchronization protocol. Ordinary movements return a nil resolution.
+func (s *Service) AppendMovementInTransactionWithResolution(ctx context.Context, queries *db.Queries, input AppendInput) (db.StockMovement, *StocktakeResolution, error) {
 	if s == nil || queries == nil {
-		return db.StockMovement{}, ErrInvalidInput
+		return db.StockMovement{}, nil, ErrInvalidInput
 	}
 	normalized, err := normalizeAppendInput(input)
 	if err != nil {
-		return db.StockMovement{}, err
+		return db.StockMovement{}, nil, err
 	}
-	return s.appendInTransaction(ctx, queries, normalized)
+	return s.appendInTransactionWithPolicy(ctx, queries, normalized, true)
 }
 
 // Append is a concise alias for AppendMovement.
@@ -283,56 +330,87 @@ func (s *Service) VerifyProjection(ctx context.Context, userID uuid.UUID) (Proje
 }
 
 func (s *Service) appendInTransaction(ctx context.Context, queries *db.Queries, input AppendInput) (db.StockMovement, error) {
+	movement, _, err := s.appendInTransactionWithPolicy(ctx, queries, input, false)
+	return movement, err
+}
+
+func (s *Service) appendInTransactionWithPolicy(ctx context.Context, queries *db.Queries, input AppendInput, enforceStocktakePolicy bool) (db.StockMovement, *StocktakeResolution, error) {
 	product, err := queries.GetProductForUpdate(ctx, input.UserID, input.ProductID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return db.StockMovement{}, classifyProductMiss(ctx, queries, input.UserID, input.ProductID)
+		return db.StockMovement{}, nil, classifyProductMiss(ctx, queries, input.UserID, input.ProductID)
 	}
 	if err != nil {
-		return db.StockMovement{}, err
+		return db.StockMovement{}, nil, err
 	}
 	if product.DeletedAt != nil {
-		return db.StockMovement{}, ErrProductDeleted
+		return db.StockMovement{}, nil, ErrProductDeleted
 	}
 
 	if input.ReversesID != nil {
 		original, err := queries.GetStockMovementByID(ctx, *input.ReversesID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.StockMovement{}, ErrMovementNotFound
+			return db.StockMovement{}, nil, ErrMovementNotFound
 		}
 		if err != nil {
-			return db.StockMovement{}, err
+			return db.StockMovement{}, nil, err
 		}
 		if original.UserID != input.UserID {
-			return db.StockMovement{}, ErrOwnershipViolation
+			return db.StockMovement{}, nil, ErrOwnershipViolation
 		}
 		if original.ProductID != input.ProductID {
-			return db.StockMovement{}, ErrInvalidReversal
+			return db.StockMovement{}, nil, ErrInvalidReversal
 		}
+	}
+
+	var latestStocktake *db.StockMovement
+	if enforceStocktakePolicy && input.Kind == kindStocktake {
+		latest, latestErr := queries.GetLatestStocktake(ctx, input.UserID, input.ProductID)
+		if errors.Is(latestErr, pgx.ErrNoRows) {
+			// The first stocktake establishes the initial canonical ordering key.
+		} else if latestErr != nil {
+			return db.StockMovement{}, nil, latestErr
+		} else {
+			latestStocktake = &latest
+		}
+	}
+
+	var canonical db.LedgerBalance
+	if input.Kind == kindStocktake {
+		canonical, err = queries.GetProductLedgerBalance(ctx, input.UserID, input.ProductID)
+		if err != nil {
+			return db.StockMovement{}, nil, err
+		}
+	}
+
+	if input.Kind == kindStocktake && latestStocktake != nil && !stocktakeComesAfter(input.OccurredAt, input.ID, latestStocktake.OccurredAt, latestStocktake.ID) {
+		resolution := StocktakeResolution{
+			ProductID:        input.ProductID,
+			CanonicalBalance: canonical.Qty,
+			Canonical:        stocktakeIntentFromMovement(*latestStocktake),
+			Incoming:         stocktakeIntentFromInput(input),
+		}
+		return db.StockMovement{}, &resolution, &StocktakeDisplacedError{Resolution: resolution}
 	}
 
 	delta := input.Delta
 	if input.Kind == kindStocktake {
-		canonical, err := queries.GetProductLedgerBalance(ctx, input.UserID, input.ProductID)
-		if err != nil {
-			return db.StockMovement{}, err
-		}
 		delta64 := int64(*input.CountedQty) - canonical.Qty
 		if delta64 == 0 || delta64 < minInt32Value || delta64 > maxInt32Value {
-			return db.StockMovement{}, ErrInvalidDelta
+			return db.StockMovement{}, nil, ErrInvalidDelta
 		}
 		delta = int32(delta64)
 	}
 	if delta == 0 {
-		return db.StockMovement{}, ErrInvalidDelta
+		return db.StockMovement{}, nil, ErrInvalidDelta
 	}
 
 	input.Delta = delta
 	movement, err := queries.InsertStockMovement(ctx, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return db.StockMovement{}, classifyProductMiss(ctx, queries, input.UserID, input.ProductID)
+		return db.StockMovement{}, nil, classifyProductMiss(ctx, queries, input.UserID, input.ProductID)
 	}
 	if err != nil {
-		return db.StockMovement{}, mapMovementError(err)
+		return db.StockMovement{}, nil, mapMovementError(err)
 	}
 	if _, err := queries.IncrementProductBalance(ctx, db.IncrementProductBalanceParams{
 		UserID:     input.UserID,
@@ -340,9 +418,67 @@ func (s *Service) appendInTransaction(ctx context.Context, queries *db.Queries, 
 		Delta:      movement.Delta,
 		OccurredAt: movement.OccurredAt,
 	}); err != nil {
-		return db.StockMovement{}, mapMovementError(err)
+		return db.StockMovement{}, nil, mapMovementError(err)
 	}
-	return movement, nil
+
+	if input.Kind != kindStocktake || !enforceStocktakePolicy {
+		return movement, nil, nil
+	}
+	resolution := StocktakeResolution{
+		ProductID:        input.ProductID,
+		CanonicalBalance: canonical.Qty + int64(movement.Delta),
+		Canonical:        stocktakeIntentFromMovement(movement),
+		Incoming:         stocktakeIntentFromMovement(movement),
+	}
+	if latestStocktake != nil {
+		resolution.Displaced = []StocktakeIntent{stocktakeIntentFromMovement(*latestStocktake)}
+	}
+	return movement, &resolution, nil
+}
+
+// stocktakeComesAfter defines the stable canonical ordering key. Corrected
+// occurrence time preserves the user's observation order; the UUID is a
+// deterministic tie-breaker for simultaneous offline observations.
+func stocktakeComesAfter(candidateAt time.Time, candidateID uuid.UUID, currentAt time.Time, currentID uuid.UUID) bool {
+	candidateAt = candidateAt.UTC()
+	currentAt = currentAt.UTC()
+	if candidateAt.After(currentAt) {
+		return true
+	}
+	if candidateAt.Before(currentAt) {
+		return false
+	}
+	return candidateID.String() > currentID.String()
+}
+
+func stocktakeIntentFromInput(input AppendInput) StocktakeIntent {
+	countedQty := int32(0)
+	if input.CountedQty != nil {
+		countedQty = *input.CountedQty
+	}
+	return StocktakeIntent{
+		MovementID: input.ID,
+		ProductID:  input.ProductID,
+		Delta:      input.Delta,
+		CountedQty: countedQty,
+		OccurredAt: input.OccurredAt.UTC(),
+		DeviceID:   input.DeviceID,
+	}
+}
+
+func stocktakeIntentFromMovement(movement db.StockMovement) StocktakeIntent {
+	countedQty := int32(0)
+	if movement.CountedQty != nil {
+		countedQty = *movement.CountedQty
+	}
+	return StocktakeIntent{
+		MovementID: movement.ID,
+		ProductID:  movement.ProductID,
+		Delta:      movement.Delta,
+		CountedQty: countedQty,
+		OccurredAt: movement.OccurredAt.UTC(),
+		DeviceID:   movement.DeviceID,
+	}
 }
 
 func normalizeAppendInput(input AppendInput) (AppendInput, error) {

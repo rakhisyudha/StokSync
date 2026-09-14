@@ -129,6 +129,15 @@ SELECT
 FROM stock_movements
 WHERE id = $1`
 
+	getLatestStocktakeSQL = `
+SELECT
+    id, user_id, product_id, delta, kind, note, occurred_at, raw_occurred_at,
+    clock_offset_ms, counted_qty, reverses_id, device_id, server_created_at
+FROM stock_movements
+WHERE user_id = $1 AND product_id = $2 AND kind = 'stocktake'
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1`
+
 	getProductLedgerBalanceSQL = `
 SELECT COALESCE(SUM(delta), 0)::bigint, MAX(occurred_at)
 FROM stock_movements
@@ -456,6 +465,13 @@ func (q *Queries) GetStockMovement(ctx context.Context, userID, movementID uuid.
 // from a movement owned by another account before returning a domain error.
 func (q *Queries) GetStockMovementByID(ctx context.Context, movementID uuid.UUID) (StockMovement, error) {
 	return scanStockMovement(q.db.QueryRow(ctx, getStockMovementByIDSQL, uuidArg(movementID)))
+}
+
+// GetLatestStocktake returns the greatest canonical stocktake ordering key for
+// a product. The product row is locked by the caller before this read, so two
+// concurrent stocktake decisions serialize on the same product.
+func (q *Queries) GetLatestStocktake(ctx context.Context, userID, productID uuid.UUID) (StockMovement, error) {
+	return scanStockMovement(q.db.QueryRow(ctx, getLatestStocktakeSQL, uuidArg(userID), uuidArg(productID)))
 }
 
 // GetProductLedgerBalance computes the canonical quantity and latest

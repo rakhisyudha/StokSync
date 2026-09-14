@@ -164,8 +164,19 @@ abstract interface class SyncCursorStore {
 /// delete, reset, or otherwise rewrite local products, movements, queue rows,
 /// or conflict records when authentication becomes blocked.
 abstract interface class SyncStatusStore {
+  /// Records that a serialized sync cycle has started.
+  Future<void> markSyncing();
+
+  /// Records a retryable failure while retaining the latest safe error summary.
+  Future<void> markBackingOff({required String error});
+
+  /// Records a terminal operation error without blocking unrelated sync work.
+  Future<void> markError({required String error});
+
+  /// Records an authentication/schema blocker that requires user/app action.
   Future<void> markBlocked({required String error});
 
+  /// Clears transient status after a fully applied sync cycle.
   Future<void> markSyncSucceeded(DateTime serverTime);
 }
 
@@ -290,12 +301,25 @@ final class SyncEngine {
   }
 
   Future<SyncCycleResult?> _synchronizeOnce() async {
-    await _pendingOperations.recoverInterruptedOperations();
+    await _bestEffortMarkSyncing();
     final now = _now().toUtc();
-    final operations = await _pendingOperations.claimDueOperations(
-      now: now,
-      limit: maxOperations,
-    );
+    try {
+      await _pendingOperations.recoverInterruptedOperations();
+    } catch (error, stackTrace) {
+      await _bestEffortMarkError(error);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+
+    late final List<PendingSyncOperation> operations;
+    try {
+      operations = await _pendingOperations.claimDueOperations(
+        now: now,
+        limit: maxOperations,
+      );
+    } catch (error, stackTrace) {
+      await _bestEffortMarkError(error);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
 
     final syncOperations = <SyncOperation>[];
     try {
@@ -311,6 +335,7 @@ final class SyncEngine {
     try {
       cursor = await _cursorStore.readCursor();
     } catch (error, stackTrace) {
+      await _bestEffortMarkError(error);
       await _bestEffortRelease(operations);
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -380,6 +405,7 @@ final class SyncEngine {
           requireEmptyResults: true,
         );
       } catch (error, stackTrace) {
+        await _bestEffortMarkError(error);
         Error.throwWithStackTrace(error, stackTrace);
       }
 
@@ -408,6 +434,7 @@ final class SyncEngine {
         // A crash or failed local apply must not strand queue rows as
         // inflight. If this release is interrupted too, the next cycle's
         // recovery pass makes them eligible again.
+        await _bestEffortMarkError(error);
         await _bestEffortRelease(operations);
         Error.throwWithStackTrace(error, stackTrace);
       }
@@ -429,6 +456,7 @@ final class SyncEngine {
       }
       return persistedCursor;
     } catch (error, stackTrace) {
+      await _bestEffortMarkError(error);
       await _bestEffortRelease(operations);
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -503,6 +531,7 @@ final class SyncEngine {
     try {
       switch (classification.disposition) {
         case SyncRetryDisposition.retryable:
+          await _bestEffortMarkBackingOff(error);
           for (final operation in operations) {
             final nextAttempt = operation.attempts + 1;
             await _pendingOperations.scheduleRetry(
@@ -518,6 +547,7 @@ final class SyncEngine {
             operations.map((operation) => operation.opId),
           );
         case SyncRetryDisposition.terminal:
+          await _bestEffortMarkError(error);
           for (final operation in operations) {
             await _pendingOperations.markBlocked(
               operation.opId,
@@ -529,6 +559,42 @@ final class SyncEngine {
       // The original failure remains authoritative. Any rows left inflight
       // are recoverable by the next cycle, so a secondary local-write error
       // must not hide the network/protocol failure or lose the operation.
+    }
+  }
+
+  Future<void> _bestEffortMarkSyncing() async {
+    final store = _statusStore;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.markSyncing();
+    } on Object {
+      // Status metadata is advisory; a failure must not prevent sync work.
+    }
+  }
+
+  Future<void> _bestEffortMarkBackingOff(Object error) async {
+    final store = _statusStore;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.markBackingOff(error: _safeErrorSummary(error));
+    } on Object {
+      // The original retryable failure remains authoritative.
+    }
+  }
+
+  Future<void> _bestEffortMarkError(Object error) async {
+    final store = _statusStore;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.markError(error: _safeErrorSummary(error));
+    } on Object {
+      // The original terminal failure remains authoritative.
     }
   }
 

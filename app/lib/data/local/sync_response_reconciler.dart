@@ -6,6 +6,7 @@ import 'package:sync_engine/sync_engine.dart';
 import '../../core/identifiers/uuid_v7_generator.dart';
 import 'product_three_way_merge.dart';
 import 'remote_change_applier.dart';
+import 'stocktake_conflict_store.dart';
 import 'stoksync_database.dart';
 
 /// Applies push outcomes to the local replica.
@@ -108,6 +109,12 @@ final class DriftSyncResponseReconciler {
                 canonicalChange,
                 response.serverTime,
               );
+            }
+            if (result.stocktakeOutcome != null) {
+              await StocktakeConflictStore(
+                _database,
+                clock: _clock,
+              ).recordOutcome(result.stocktakeOutcome!);
             }
             await _removeAppliedOperation(stored.opId);
           case SyncOperationResultStatus.rejected:
@@ -675,7 +682,9 @@ final class DriftSyncResponseReconciler {
     }
 
     final serverPayload = result.serverState == null
-        ? null
+        ? result.stocktakeOutcome == null
+              ? null
+              : jsonEncode(result.stocktakeOutcome)
         : jsonEncode(result.serverState);
     final basePayload =
         operation.basePayload ??

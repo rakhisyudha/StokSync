@@ -35,6 +35,7 @@ const (
 	ReasonBarcodeConflict     = "barcode_conflict"
 	ReasonProductConflict     = "product_conflict"
 	ReasonMovementConflict    = "movement_conflict"
+	ReasonStocktakeDisplaced  = "stocktake_displaced"
 	ReasonOwnershipViolation  = "ownership_violation"
 	ReasonDeviceMismatch      = "device_mismatch"
 
@@ -175,7 +176,7 @@ func (s *Service) applyMovement(ctx context.Context, queries *db.Queries, identi
 		return rejectedResult(operation.OpID, ReasonDeviceMismatch), nil, nil
 	}
 
-	movement, err := s.movementService.AppendMovementInTransaction(ctx, queries, movements.AppendInput{
+	movement, resolution, err := s.movementService.AppendMovementInTransactionWithResolution(ctx, queries, movements.AppendInput{
 		ID:            payload.ID,
 		UserID:        identity.UserID,
 		ProductID:     payload.ProductID,
@@ -190,16 +191,28 @@ func (s *Service) applyMovement(ctx context.Context, queries *db.Queries, identi
 		DeviceID:      identity.DeviceID,
 	})
 	if err != nil {
+		var displaced *movements.StocktakeDisplacedError
+		if errors.As(err, &displaced) {
+			outcome := stocktakeOutcomeFromResolution(displaced.Resolution)
+			result := rejectedResult(operation.OpID, ReasonStocktakeDisplaced)
+			result.StocktakeOutcome = &outcome
+			return result, nil, nil
+		}
 		if result, ok := rejectedForDomainError(operation.OpID, err); ok {
 			return result, nil, nil
 		}
 		return OperationResult{}, nil, err
 	}
-	payloadJSON, err := marshalMovementChange(movement)
+	payloadJSON, err := marshalMovementChange(movement, resolution)
 	if err != nil {
 		return OperationResult{}, nil, err
 	}
-	return OperationResult{OpID: operation.OpID, Status: ResultStatusApplied}, &operationChange{
+	result := OperationResult{OpID: operation.OpID, Status: ResultStatusApplied}
+	if resolution != nil {
+		outcome := stocktakeOutcomeFromResolution(*resolution)
+		result.StocktakeOutcome = &outcome
+	}
+	return result, &operationChange{
 		Entity:   changeEntityMovement,
 		Op:       changeOpUpsert,
 		EntityID: movement.ID,
@@ -560,39 +573,71 @@ func attachCanonicalProductState(ctx context.Context, queries *db.Queries, userI
 }
 
 type movementChangePayload struct {
-	ID              string    `json:"id"`
-	ProductID       string    `json:"product_id"`
-	Delta           int32     `json:"delta"`
-	Kind            string    `json:"kind"`
-	Note            *string   `json:"note"`
-	OccurredAt      time.Time `json:"occurred_at"`
-	RawOccurredAt   time.Time `json:"raw_occurred_at"`
-	ClockOffsetMs   int64     `json:"clock_offset_ms"`
-	CountedQty      *int32    `json:"counted_qty"`
-	ReversesID      *string   `json:"reverses_id"`
-	DeviceID        string    `json:"device_id"`
-	ServerCreatedAt time.Time `json:"server_created_at"`
+	ID               string            `json:"id"`
+	ProductID        string            `json:"product_id"`
+	Delta            int32             `json:"delta"`
+	Kind             string            `json:"kind"`
+	Note             *string           `json:"note"`
+	OccurredAt       time.Time         `json:"occurred_at"`
+	RawOccurredAt    time.Time         `json:"raw_occurred_at"`
+	ClockOffsetMs    int64             `json:"clock_offset_ms"`
+	CountedQty       *int32            `json:"counted_qty"`
+	ReversesID       *string           `json:"reverses_id"`
+	DeviceID         string            `json:"device_id"`
+	ServerCreatedAt  time.Time         `json:"server_created_at"`
+	StocktakeOutcome *StocktakeOutcome `json:"stocktake_outcome,omitempty"`
 }
 
-func marshalMovementChange(movement db.StockMovement) ([]byte, error) {
+func stocktakeOutcomeFromResolution(resolution movements.StocktakeResolution) StocktakeOutcome {
+	displaced := make([]StocktakeIntent, 0, len(resolution.Displaced))
+	for _, intent := range resolution.Displaced {
+		displaced = append(displaced, stocktakeIntentFromMovement(intent))
+	}
+	return StocktakeOutcome{
+		ProductID:        resolution.ProductID,
+		CanonicalBalance: resolution.CanonicalBalance,
+		Canonical:        stocktakeIntentFromMovement(resolution.Canonical),
+		Incoming:         stocktakeIntentFromMovement(resolution.Incoming),
+		Displaced:        displaced,
+	}
+}
+
+func stocktakeIntentFromMovement(intent movements.StocktakeIntent) StocktakeIntent {
+	return StocktakeIntent{
+		MovementID: intent.MovementID,
+		ProductID:  intent.ProductID,
+		Delta:      intent.Delta,
+		CountedQty: intent.CountedQty,
+		OccurredAt: intent.OccurredAt.UTC(),
+		DeviceID:   intent.DeviceID,
+	}
+}
+
+func marshalMovementChange(movement db.StockMovement, resolution *movements.StocktakeResolution) ([]byte, error) {
 	var reversesID *string
 	if movement.ReversesID != nil {
 		value := movement.ReversesID.String()
 		reversesID = &value
 	}
+	var stocktakeOutcome *StocktakeOutcome
+	if resolution != nil {
+		outcome := stocktakeOutcomeFromResolution(*resolution)
+		stocktakeOutcome = &outcome
+	}
 	return json.Marshal(movementChangePayload{
-		ID:              movement.ID.String(),
-		ProductID:       movement.ProductID.String(),
-		Delta:           movement.Delta,
-		Kind:            movement.Kind,
-		Note:            cloneString(movement.Note),
-		OccurredAt:      movement.OccurredAt.UTC(),
-		RawOccurredAt:   movement.RawOccurredAt.UTC(),
-		ClockOffsetMs:   movement.ClockOffsetMs,
-		CountedQty:      cloneInt32(movement.CountedQty),
-		ReversesID:      reversesID,
-		DeviceID:        movement.DeviceID.String(),
-		ServerCreatedAt: movement.ServerCreatedAt.UTC(),
+		ID:               movement.ID.String(),
+		ProductID:        movement.ProductID.String(),
+		Delta:            movement.Delta,
+		Kind:             movement.Kind,
+		Note:             cloneString(movement.Note),
+		OccurredAt:       movement.OccurredAt.UTC(),
+		RawOccurredAt:    movement.RawOccurredAt.UTC(),
+		ClockOffsetMs:    movement.ClockOffsetMs,
+		CountedQty:       cloneInt32(movement.CountedQty),
+		ReversesID:       reversesID,
+		DeviceID:         movement.DeviceID.String(),
+		ServerCreatedAt:  movement.ServerCreatedAt.UTC(),
+		StocktakeOutcome: stocktakeOutcome,
 	})
 }
 

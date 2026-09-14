@@ -36,6 +36,7 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
       appBar: AppBar(
         title: const Text('Products'),
         actions: [
+          const SyncStatusChip(),
           IconButton(
             key: const Key('conflicts-button'),
             tooltip: 'Conflicts',

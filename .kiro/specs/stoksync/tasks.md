@@ -89,10 +89,10 @@ This document is the incremental implementation plan for StokSync, covering the 
 - [x] 5.3 Implement and test duplicate barcode conflict handling based on the active-barcode unique index.
 - [x] 5.4 Implement and test delete-wins behavior for edit-versus-tombstone races.
 - [x] 5.5 Implement stocktake processing that stores `counted_qty` and recomputes its delta against the canonical ledger in the server transaction.
-- [ ] 5.6 Document and implement deterministic treatment of concurrent stocktakes, including an informational or resolvable record for stale/displaced intent.
+- [x] 5.6 Document and implement deterministic treatment of concurrent stocktakes, including an informational or resolvable record for stale/displaced intent.
 - [x] 5.7 Build the Flutter conflict list/detail/resolution flows showing reason, base/local/server payloads, and the explicit follow-up action.
-- [ ] 5.8 Implement the sync-status chip and detail screen showing state, pending count, conflicts, last successful sync, and error summary.
-- [ ] 5.9 Add automated scenarios for every row in the documented conflict matrix.
+- [x] 5.8 Implement the sync-status chip and detail screen showing state, pending count, conflicts, last successful sync, and error summary.
+- [x] 5.9 Add automated scenarios for every row in the documented conflict matrix.
 
 **Milestone validation:** Reproduce all acceptance scenarios in `requirements.md`, including overlapping/disjoint product edits, barcode collision, tombstone race, concurrent stocktakes, and offline expired-token behavior. No rejected intent is silently discarded.
 

@@ -235,6 +235,43 @@ func TestDecodeRequestEnforcesBodyOperationPayloadAndChangeLimits(t *testing.T) 
 	}
 }
 
+func TestStocktakeOutcomeRoundTripsInAppliedAndRejectedResults(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 2, 5, 4, 5, 0, time.UTC)
+	productID := uuid.New()
+	movementID := uuid.New()
+	outcome := &StocktakeOutcome{
+		ProductID:        productID,
+		CanonicalBalance: 15,
+		Canonical: StocktakeIntent{
+			MovementID: movementID, ProductID: productID, Delta: 5,
+			CountedQty: 15, OccurredAt: now, DeviceID: uuid.New(),
+		},
+		Incoming: StocktakeIntent{
+			MovementID: uuid.New(), ProductID: productID, Delta: -3,
+			CountedQty: 12, OccurredAt: now, DeviceID: uuid.New(),
+		},
+	}
+	response := NewSyncResponse([]OperationResult{
+		{OpID: uuid.New(), Status: ResultStatusRejected, Reason: ReasonStocktakeDisplaced, StocktakeOutcome: outcome},
+	}, nil, 0, false, now)
+	body, err := MarshalResponse(response)
+	if err != nil {
+		t.Fatalf("MarshalResponse() error = %v", err)
+	}
+	var decoded SyncResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if decoded.Results[0].StocktakeOutcome == nil || decoded.Results[0].StocktakeOutcome.CanonicalBalance != 15 {
+		t.Fatalf("decoded stocktake outcome = %#v, want canonical balance 15", decoded.Results[0].StocktakeOutcome)
+	}
+	if decoded.Results[0].Reason != ReasonStocktakeDisplaced {
+		t.Fatalf("decoded reason = %q, want %q", decoded.Results[0].Reason, ReasonStocktakeDisplaced)
+	}
+}
+
 func TestResponseEncodingIsVersionedCompleteAndStrict(t *testing.T) {
 	t.Parallel()
 
@@ -334,6 +371,10 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 }
 
 func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func int32Pointer(value int32) *int32 {
 	return &value
 }
 

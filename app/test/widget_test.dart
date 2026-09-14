@@ -37,7 +37,13 @@ void main() {
 
     expect(find.text('Products'), findsOneWidget);
     expect(find.byKey(const Key('sync-status-card')), findsOneWidget);
-    expect(find.text('Local only'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('sync-status-card')),
+        matching: find.text('Local only'),
+      ),
+      findsOneWidget,
+    );
     expect(
       find.text('No products yet. Add one to start your local catalog.'),
       findsOneWidget,

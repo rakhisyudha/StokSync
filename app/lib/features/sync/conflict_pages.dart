@@ -390,6 +390,7 @@ String conflictReasonLabel(String reason) {
     'version_conflict' => 'Product edit conflict',
     'barcode_conflict' => 'Barcode conflict',
     'product_deleted' => 'Product deleted remotely',
+    'stocktake_displaced' => 'Stocktake superseded by another device',
     'product_not_found' => 'Product no longer exists',
     'invalid_operation' => 'Invalid operation',
     _ => reason.replaceAll('_', ' '),

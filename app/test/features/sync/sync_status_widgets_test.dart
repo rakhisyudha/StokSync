@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stoksync/data/local/local_query_providers.dart';
 import 'package:stoksync/features/sync/sync_status_widgets.dart';
+import 'package:stoksync/features/sync/sync_reachability.dart';
+import 'package:stoksync/features/sync/sync_trigger_coordinator.dart';
+import 'package:stoksync/features/sync/sync_trigger_providers.dart';
 
 void main() {
   group('local sync status presentation', () {
@@ -207,6 +210,148 @@ void main() {
         expect(find.text('Needs attention'), findsOneWidget);
       },
     );
+    test(
+      'maps every persisted state to an explicit user-facing state label',
+      () {
+        expect(syncStatusStateLabel('idle'), 'Idle');
+        expect(syncStatusStateLabel('syncing'), 'Syncing');
+        expect(syncStatusStateLabel('backing_off'), 'Backing off');
+        expect(syncStatusStateLabel('blocked'), 'Blocked');
+      },
+    );
+
+    testWidgets('detail screen shows the complete local sync summary', (
+      tester,
+    ) async {
+      final summary = SyncSummary(
+        cursor: 8,
+        bootstrapped: true,
+        status: 'syncing',
+        lastSyncedAt: DateTime.utc(2026, 9, 13, 10, 2),
+        lastError: 'network timeout',
+        pendingOperationCount: 3,
+        unresolvedConflictCount: 2,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncSummaryProvider.overrideWith((_) => Stream.value(summary)),
+          ],
+          child: const MaterialApp(home: SyncStatusDetailPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('sync-status-state')), findsOneWidget);
+      expect(find.text('Syncing'), findsAtLeastNWidgets(1));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('sync-status-pending-count')),
+          matching: find.text('3'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('sync-status-conflict-count')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('sync-status-last-successful-sync')),
+          matching: find.text('2026-09-13 10:02 UTC'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('sync-status-error-summary')),
+          matching: find.text('network timeout'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('status chip navigates to the local detail screen', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncSummaryProvider.overrideWith(
+              (_) => Stream.value(
+                const SyncSummary(
+                  cursor: 0,
+                  bootstrapped: false,
+                  lastSyncedAt: null,
+                  lastError: null,
+                  pendingOperationCount: 0,
+                  unresolvedConflictCount: 0,
+                ),
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: SyncStatusChip())),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('sync-status-chip')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sync status'), findsOneWidget);
+      expect(
+        find.byKey(const Key('sync-status-detail-content')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('detail screen offers manual sync when runtime is available', (
+      tester,
+    ) async {
+      var synchronizeCalls = 0;
+      final coordinator = SyncTriggerCoordinator(
+        synchronize: () async {
+          synchronizeCalls++;
+          return null;
+        },
+        reachability: _ReachableProbe(),
+      )..start(initiallyForeground: false);
+      addTearDown(coordinator.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncSummaryProvider.overrideWith(
+              (_) => Stream.value(
+                const SyncSummary(
+                  cursor: 0,
+                  bootstrapped: false,
+                  lastSyncedAt: null,
+                  lastError: null,
+                  pendingOperationCount: 0,
+                  unresolvedConflictCount: 0,
+                ),
+              ),
+            ),
+            syncTriggerCoordinatorProvider.overrideWithValue(coordinator),
+          ],
+          child: const MaterialApp(home: SyncStatusDetailPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('manual-sync-detail-button')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('manual-sync-detail-button')));
+      await tester.pumpAndSettle();
+      expect(synchronizeCalls, 1);
+    });
   });
 }
 
@@ -229,4 +374,9 @@ Future<void> _waitFor(
     await tester.pump(const Duration(milliseconds: 10));
   }
   fail('Timed out waiting for $description.');
+}
+
+final class _ReachableProbe implements SyncReachabilityProbe {
+  @override
+  Future<bool> check() async => true;
 }

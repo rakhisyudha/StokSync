@@ -504,6 +504,7 @@ final class SyncOperationResult {
     this.seq,
     this.reason,
     this.serverState,
+    this.stocktakeOutcome,
   });
 
   final String opId;
@@ -511,6 +512,7 @@ final class SyncOperationResult {
   final int? seq;
   final String? reason;
   final Map<String, Object?>? serverState;
+  final Map<String, Object?>? stocktakeOutcome;
 
   Map<String, Object?> toJson() {
     _validateUuid(opId, 'results.op_id');
@@ -539,6 +541,7 @@ final class SyncOperationResult {
       if (seq != null) 'seq': seq,
       if (reason != null) 'reason': reason,
       if (serverState != null) 'server_state': serverState,
+      if (stocktakeOutcome != null) 'stocktake_outcome': stocktakeOutcome,
     };
   }
 
@@ -546,7 +549,14 @@ final class SyncOperationResult {
     final map = _object(value, 'result');
     _checkKeys(
       map,
-      const {'op_id', 'status', 'seq', 'reason', 'server_state'},
+      const {
+        'op_id',
+        'status',
+        'seq',
+        'reason',
+        'server_state',
+        'stocktake_outcome',
+      },
       const {'op_id', 'status'},
       'result',
     );
@@ -559,6 +569,10 @@ final class SyncOperationResult {
       seq: _optionalInt(map['seq'], 'results.seq'),
       reason: _optionalString(map['reason'], 'results.reason'),
       serverState: _optionalObject(map['server_state'], 'results.server_state'),
+      stocktakeOutcome: _optionalObject(
+        map['stocktake_outcome'],
+        'results.stocktake_outcome',
+      ),
     );
     result.toJson();
     return result;

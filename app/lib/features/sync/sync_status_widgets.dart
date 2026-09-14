@@ -7,6 +7,38 @@ import '../../data/local/local_query_providers.dart';
 import 'sync_trigger_coordinator.dart';
 import 'sync_trigger_providers.dart';
 
+/// A compact, reactive entry point to the local sync-status detail screen.
+class SyncStatusChip extends ConsumerWidget {
+  const SyncStatusChip({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(syncSummaryProvider);
+    return Semantics(
+      button: true,
+      label: 'Open sync status details',
+      child: summary.when(
+        loading: () => ActionChip(
+          key: const Key('sync-status-chip'),
+          label: const Text('Sync status'),
+          onPressed: () => _openSyncStatusDetails(context),
+        ),
+        error: (_, _) => ActionChip(
+          key: const Key('sync-status-chip'),
+          label: const Text('Sync unavailable'),
+          onPressed: () => _openSyncStatusDetails(context),
+        ),
+        data: (value) => ActionChip(
+          key: const Key('sync-status-chip'),
+          avatar: const Icon(Icons.sync_outlined, size: 18),
+          label: Text(localSyncStatusLabel(value)),
+          onPressed: () => _openSyncStatusDetails(context),
+        ),
+      ),
+    );
+  }
+}
+
 /// A local-first sync status surface with an optional manual trigger.
 ///
 /// Counts and timestamps come from the Drift replica. When an authenticated
@@ -38,9 +70,15 @@ class LocalSyncStatusCard extends ConsumerWidget {
 /// Returns the current status label without implying that a network request
 /// has happened.
 String localSyncStatusLabel(SyncSummary summary) {
-  if (summary.status == 'blocked') {
-    return 'Sync blocked';
+  switch (summary.status.trim().toLowerCase()) {
+    case 'syncing':
+      return 'Syncing';
+    case 'backing_off':
+      return 'Backing off';
+    case 'blocked':
+      return 'Sync blocked';
   }
+
   final error = summary.lastError?.trim();
   if (error != null && error.isNotEmpty) {
     return 'Needs attention';
@@ -54,13 +92,33 @@ String localSyncStatusLabel(SyncSummary summary) {
   return 'Local only';
 }
 
+/// Returns the user-facing name of the persisted sync state.
+String syncStatusStateLabel(String status) {
+  return switch (status.trim().toLowerCase()) {
+    'syncing' => 'Syncing',
+    'backing_off' => 'Backing off',
+    'blocked' => 'Blocked',
+    'idle' => 'Idle',
+    _ => 'Idle',
+  };
+}
+
 /// Returns the latest locally known sync detail for the status card.
 String localSyncLastKnownStatus(SyncSummary summary) {
   final error = summary.lastError?.trim();
-  if (summary.status == 'blocked') {
-    return error == null || error.isEmpty
-        ? 'Sync is blocked until authentication is restored. Local work is retained.'
-        : 'Sync blocked: $error';
+  switch (summary.status.trim().toLowerCase()) {
+    case 'syncing':
+      return error == null || error.isEmpty
+          ? 'Sync is in progress. Local data remains available.'
+          : 'Sync is in progress. Last error: $error';
+    case 'backing_off':
+      return error == null || error.isEmpty
+          ? 'Sync will retry automatically. Local work is retained.'
+          : 'Sync will retry automatically: $error';
+    case 'blocked':
+      return error == null || error.isEmpty
+          ? 'Sync is blocked until authentication is restored. Local work is retained.'
+          : 'Sync blocked: $error';
   }
   if (error != null && error.isNotEmpty) {
     return 'Last attempt failed: $error';
@@ -110,10 +168,11 @@ class _LocalSyncStatusContent extends StatelessWidget {
                   unawaited(coordinator!.manualRefresh());
                 },
               ),
-            Chip(
+            ActionChip(
               key: const Key('sync-status-label'),
               label: Text(status),
               visualDensity: VisualDensity.compact,
+              onPressed: () => _openSyncStatusDetails(context),
             ),
           ],
         ),
@@ -150,6 +209,130 @@ class _LocalSyncStatusContent extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Shows the complete local sync summary and an optional manual sync action.
+class SyncStatusDetailPage extends ConsumerWidget {
+  const SyncStatusDetailPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(syncSummaryProvider);
+    final coordinator = ref.watch(syncTriggerCoordinatorProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sync status')),
+      body: summary.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) =>
+            const Center(child: Text('Local sync status is unavailable.')),
+        data: (value) =>
+            _SyncStatusDetailContent(summary: value, coordinator: coordinator),
+      ),
+    );
+  }
+}
+
+class _SyncStatusDetailContent extends StatelessWidget {
+  const _SyncStatusDetailContent({
+    required this.summary,
+    required this.coordinator,
+  });
+
+  final SyncSummary summary;
+  final SyncTriggerCoordinator? coordinator;
+
+  @override
+  Widget build(BuildContext context) {
+    final lastSyncedAt = summary.lastSyncedAt;
+    final error = summary.lastError?.trim();
+    return ListView(
+      key: const Key('sync-status-detail-content'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.sync_outlined, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    syncStatusStateLabel(summary.status),
+                    key: const Key('sync-status-state'),
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                ),
+                Chip(
+                  key: const Key('sync-status-detail-chip'),
+                  label: Text(localSyncStatusLabel(summary)),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SyncStatusDetailMetric(
+          key: const Key('sync-status-pending-count'),
+          label: 'Pending operations',
+          value: '${summary.pendingOperationCount}',
+        ),
+        _SyncStatusDetailMetric(
+          key: const Key('sync-status-conflict-count'),
+          label: 'Unresolved conflicts',
+          value: '${summary.unresolvedConflictCount}',
+        ),
+        _SyncStatusDetailMetric(
+          key: const Key('sync-status-last-successful-sync'),
+          label: 'Last successful sync',
+          value: lastSyncedAt == null ? 'Never' : _formatUtc(lastSyncedAt),
+        ),
+        _SyncStatusDetailMetric(
+          key: const Key('sync-status-error-summary'),
+          label: 'Latest error',
+          value: error == null || error.isEmpty ? 'None recorded' : error,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          localSyncLastKnownStatus(summary),
+          key: const Key('sync-status-detail-copy'),
+        ),
+        if (coordinator != null) ...[
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            key: const Key('manual-sync-detail-button'),
+            onPressed: () => unawaited(coordinator!.manualRefresh()),
+            icon: const Icon(Icons.sync),
+            label: const Text('Sync now'),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SyncStatusDetailMetric extends StatelessWidget {
+  const _SyncStatusDetailMetric({
+    super.key,
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(title: Text(label), subtitle: Text(value)),
+    );
+  }
+}
+
+void _openSyncStatusDetails(BuildContext context) {
+  Navigator.of(
+    context,
+  ).push<void>(MaterialPageRoute(builder: (_) => const SyncStatusDetailPage()));
 }
 
 class _SyncStatusMetric extends StatelessWidget {

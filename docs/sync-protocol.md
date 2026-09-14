@@ -76,13 +76,28 @@ For a `stocktake`, `counted_qty` is the absolute non-negative physical count
 and the client `delta` is only an optimistic local value. The server locks the
 active product row, reads the ledger-derived canonical balance, and computes
 `delta = counted_qty - canonical_balance` in the same PostgreSQL transaction
-that inserts the immutable movement and updates `product_balances`. The stored
-change-log payload therefore contains both the submitted `counted_qty` and the
-server-computed delta. A zero computed delta is rejected because every retained
-movement must have a non-zero delta. The idempotency outcome and change-log
-entry commit with that movement, so retrying the same operation replays the
-original canonical result without recomputing or inserting another row.
+that inserts the immutable movement and updates `product_balances`.
 
+Concurrent/stale stocktakes use the deterministic ordering key
+`(occurred_at, movement_id)`, where `occurred_at` is corrected device time and
+`movement_id` is the UUIDv7 tie-breaker. The greatest key is canonical. A
+higher-key stocktake is accepted and recomputed against the current ledger; the
+previous canonical stocktake remains immutable and is listed as displaced. A
+lower-or-equal-key stocktake is rejected with `reason: "stocktake_displaced"`
+and no ledger row is written. Its operation result includes `stocktake_outcome`
+with the incoming intent, canonical winner, current canonical balance, and any
+displaced intent. Accepted stocktake results and their movement change payloads
+also include this metadata, allowing replicas that did not submit the
+stocktake to retain displaced intent in local conflict history.
+
+The stored change-log payload therefore contains both the submitted
+`counted_qty` and the server-computed delta. A zero computed delta is rejected
+because every retained movement must have a non-zero delta. The idempotency
+outcome and change-log entry commit with that movement, so retrying the same
+operation replays the original canonical result without recomputing or
+inserting another row. The client preserves every rejected/displaced intent in
+its `conflicts` table under `stocktake_displaced`; it does not silently remove
+or rewrite an immutable movement.
 A successful response includes `schema_version`, independent per-operation
 `results`, an ordered `changes` page, `next_cursor`, `has_more`, and UTC
 `server_time`:

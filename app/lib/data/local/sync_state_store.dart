@@ -59,14 +59,38 @@ final class DriftSyncStatusStore implements SyncStatusStore {
   final StokSyncDatabase _database;
 
   @override
+  Future<void> markSyncing() async {
+    await _write(const SyncStateCompanion(status: Value('syncing')));
+  }
+
+  @override
+  Future<void> markBackingOff({required String error}) async {
+    await _write(
+      SyncStateCompanion(
+        status: const Value('backing_off'),
+        lastError: Value(_safeError(error)),
+      ),
+    );
+  }
+
+  @override
+  Future<void> markError({required String error}) async {
+    await _write(
+      SyncStateCompanion(
+        status: const Value('idle'),
+        lastError: Value(_safeError(error)),
+      ),
+    );
+  }
+
+  @override
   Future<void> markBlocked({required String error}) async {
-    final safeError = error.trim().isEmpty
-        ? 'authentication_required'
-        : error.trim();
     await _write(
       SyncStateCompanion(
         status: const Value('blocked'),
-        lastError: Value(safeError),
+        lastError: Value(
+          error.trim().isEmpty ? 'authentication_required' : error.trim(),
+        ),
       ),
     );
   }
@@ -92,4 +116,9 @@ final class DriftSyncStatusStore implements SyncStatusStore {
       );
     }
   }
+}
+
+String _safeError(String error) {
+  final normalized = error.trim();
+  return normalized.isEmpty ? 'sync_failed' : normalized;
 }

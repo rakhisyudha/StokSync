@@ -143,7 +143,11 @@ final class LocalInventoryQueries {
         sync_state.last_sync_at AS last_sync_at,
         sync_state.last_error AS last_error,
         sync_state.status AS status,
-        (SELECT COUNT(*) FROM pending_ops) AS pending_operation_count,
+        -- Blocked rows are retained as conflict/audit history, not actionable
+        -- queue work. In particular, a source operation that produced an
+        -- auto-merged follow-up must not leave the pending indicator stuck.
+        (SELECT COUNT(*) FROM pending_ops
+          WHERE status != 'blocked') AS pending_operation_count,
         (SELECT COUNT(*) FROM conflicts
           WHERE resolution_status = 'unresolved') AS unresolved_conflict_count
       FROM sync_state

@@ -191,6 +191,22 @@ void main() {
 
       final lastSyncedAt = DateTime.utc(2026, 9, 13, 10);
       await harness.insertPendingOperation();
+      // Rejected source operations remain durable audit history and are
+      // represented by conflicts, but must not keep the actionable-work count
+      // elevated after a merged follow-up or manual resolution.
+      await harness.database
+          .into(harness.database.pendingOperations)
+          .insert(
+            PendingOperationsCompanion.insert(
+              opId: 'blocked-operation-2',
+              localSeq: 2,
+              entity: 'product',
+              entityId: 'coffee',
+              operation: 'upsert_product',
+              payload: '{}',
+              status: const Value('blocked'),
+            ),
+          );
       await harness.insertConflict();
       await harness.updateSyncState(lastSyncedAt);
 

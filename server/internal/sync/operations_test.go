@@ -21,6 +21,129 @@ import (
 	"github.com/stoksync/stoksync/server/internal/products"
 )
 
+func TestServiceReturnsStructuredStocktakeDisplacement(t *testing.T) {
+	t.Parallel()
+
+	identity := auth.Identity{UserID: uuid.New(), DeviceID: uuid.New()}
+	productID := uuid.New()
+	lowerMovementID := uuid.MustParse("0192f3a0-0000-7000-8000-000000000001")
+	higherMovementID := uuid.MustParse("0192f3a0-0000-7000-8000-000000000002")
+	operation := Operation{
+		OpID: uuid.New(), Op: OperationAddMovement,
+		Payload: mustJSON(t, AddMovementPayload{
+			ID: higherMovementID, ProductID: productID, Delta: 1, Kind: "stocktake",
+			OccurredAt: time.Date(2026, time.July, 8, 9, 10, 11, 0, time.UTC), CountedQty: int32Pointer(15),
+		}),
+	}
+	occurredAt := time.Date(2026, time.July, 8, 9, 10, 11, 0, time.UTC)
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identity, operation.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, identity.UserID, identity.DeviceID, 1, nil),
+		syncStocktakeRow(lowerMovementID, identity.UserID, productID, identity.DeviceID, 2, occurredAt, 12),
+		syncLedgerBalanceRow(productID, 12, occurredAt),
+		syncStocktakeRow(higherMovementID, identity.UserID, productID, identity.DeviceID, 3, occurredAt, 15),
+		syncBalanceRow(productID, 15, occurredAt),
+		syncSequenceRow(105),
+		syncChangeRow(105, identity.UserID, "stock_movement", higherMovementID, "upsert", []byte(`{"id":"movement"}`), identity.DeviceID, occurredAt),
+		syncOperationRow(identity, operation.OpID, ResultStatusApplied, []byte(`{"status":"applied"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	result, err := service.ProcessOperation(context.Background(), identity, operation)
+	if err != nil {
+		t.Fatalf("ProcessOperation() error = %v", err)
+	}
+	if result.Status != ResultStatusApplied || result.StocktakeOutcome == nil {
+		t.Fatalf("result = %#v, want applied result with stocktake outcome", result)
+	}
+	if result.StocktakeOutcome.CanonicalBalance != 15 || len(result.StocktakeOutcome.Displaced) != 1 || result.StocktakeOutcome.Displaced[0].MovementID != lowerMovementID {
+		t.Fatalf("stocktake outcome = %#v, want balance 15 and displaced lower intent", result.StocktakeOutcome)
+	}
+	if result.Seq == nil || *result.Seq != 105 {
+		t.Fatalf("result sequence = %v, want 105", result.Seq)
+	}
+}
+
+func TestServiceAppendsIndependentMovementsFromDifferentDevices(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	productID := uuid.New()
+	deviceA := uuid.New()
+	deviceB := uuid.New()
+	identityA := auth.Identity{UserID: userID, DeviceID: deviceA}
+	identityB := auth.Identity{UserID: userID, DeviceID: deviceB}
+	movementA := uuid.New()
+	movementB := uuid.New()
+	operationA := Operation{
+		OpID: uuid.New(), Op: OperationAddMovement,
+		Payload: mustJSON(t, AddMovementPayload{
+			ID: movementA, ProductID: productID, Delta: -3, Kind: "issue",
+			OccurredAt: time.Date(2026, time.July, 8, 9, 10, 0, 0, time.UTC),
+		}),
+	}
+	operationB := Operation{
+		OpID: uuid.New(), Op: OperationAddMovement,
+		Payload: mustJSON(t, AddMovementPayload{
+			ID: movementB, ProductID: productID, Delta: -2, Kind: "issue",
+			OccurredAt: time.Date(2026, time.July, 8, 9, 11, 0, 0, time.UTC),
+		}),
+	}
+	tx := &syncScriptedTx{rows: []pgx.Row{
+		syncOperationRow(identityA, operationA.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, userID, deviceA, 1, nil),
+		syncMovementRow(movementA, userID, productID, deviceA, -3, "issue", time.Date(2026, time.July, 8, 9, 10, 0, 0, time.UTC)),
+		syncBalanceRow(productID, -3, time.Date(2026, time.July, 8, 9, 10, 0, 0, time.UTC)),
+		syncSequenceRow(106),
+		syncChangeRow(106, userID, changeEntityMovement, movementA, changeOpUpsert, []byte(`{"id":"movement-a"}`), deviceA, time.Date(2026, time.July, 8, 9, 10, 0, 0, time.UTC)),
+		syncOperationRow(identityA, operationA.OpID, ResultStatusApplied, []byte(`{"status":"applied"}`)),
+		syncOperationRow(identityB, operationB.OpID, syncOperationStatusProcessing, []byte(`{}`)),
+		syncProductRow(productID, userID, deviceB, 1, nil),
+		syncMovementRow(movementB, userID, productID, deviceB, -2, "issue", time.Date(2026, time.July, 8, 9, 11, 0, 0, time.UTC)),
+		syncBalanceRow(productID, -5, time.Date(2026, time.July, 8, 9, 11, 0, 0, time.UTC)),
+		syncSequenceRow(107),
+		syncChangeRow(107, userID, changeEntityMovement, movementB, changeOpUpsert, []byte(`{"id":"movement-b"}`), deviceB, time.Date(2026, time.July, 8, 9, 11, 0, 0, time.UTC)),
+		syncOperationRow(identityB, operationB.OpID, ResultStatusApplied, []byte(`{"status":"applied"}`)),
+	}}
+	service := newScriptedSyncService(t, tx)
+
+	resultA, err := service.ProcessOperation(context.Background(), identityA, operationA)
+	if err != nil {
+		t.Fatalf("first movement ProcessOperation() error = %v", err)
+	}
+	resultB, err := service.ProcessOperation(context.Background(), identityB, operationB)
+	if err != nil {
+		t.Fatalf("second movement ProcessOperation() error = %v", err)
+	}
+	if resultA.Status != ResultStatusApplied || resultB.Status != ResultStatusApplied {
+		t.Fatalf("movement results = (%#v, %#v), want both applied", resultA, resultB)
+	}
+	if resultA.Seq == nil || *resultA.Seq != 106 || resultB.Seq == nil || *resultB.Seq != 107 {
+		t.Fatalf("movement sequences = (%v, %v), want 106 and 107", resultA.Seq, resultB.Seq)
+	}
+	if tx.commitCalls != 2 || tx.rollbackCalls != 0 {
+		t.Fatalf("transaction lifecycle = (commit %d, rollback %d), want (2, 0)", tx.commitCalls, tx.rollbackCalls)
+	}
+	var changeIDs []uuid.UUID
+	for index, query := range tx.queries {
+		if !strings.Contains(query, "INSERT INTO change_log") {
+			continue
+		}
+		args := tx.args[index]
+		if len(args) < 4 {
+			t.Fatalf("change-log args = %#v, want entity id", args)
+		}
+		entityID, ok := args[3].(pgtype.UUID)
+		if !ok || !entityID.Valid {
+			t.Fatalf("change-log entity id = %#v, want valid UUID", args[3])
+		}
+		changeIDs = append(changeIDs, uuid.UUID(entityID.Bytes))
+	}
+	if !reflect.DeepEqual(changeIDs, []uuid.UUID{movementA, movementB}) {
+		t.Fatalf("change-log movement ids = %v, want both independent entries", changeIDs)
+	}
+}
+
 func TestServiceAppliesSupportedOperationsAndPersistsExactResults(t *testing.T) {
 	t.Parallel()
 
@@ -820,6 +943,20 @@ func syncMovementRow(movementID, userID, productID, deviceID uuid.UUID, delta in
 		syncUUIDArg(movementID), syncUUIDArg(userID), syncUUIDArg(productID), delta, kind,
 		pgtype.Text{}, occurredAt, occurredAt, int64(0), pgtype.Int4{}, pgtype.UUID{},
 		syncUUIDArg(deviceID), occurredAt.Add(time.Minute),
+	}}
+}
+
+func syncStocktakeRow(movementID, userID, productID, deviceID uuid.UUID, delta int32, occurredAt time.Time, countedQty int32) pgx.Row {
+	return syncStaticRow{values: []any{
+		syncUUIDArg(movementID), syncUUIDArg(userID), syncUUIDArg(productID), delta, "stocktake",
+		pgtype.Text{}, occurredAt, occurredAt, int64(0), pgtype.Int4{Int32: countedQty, Valid: true}, pgtype.UUID{},
+		syncUUIDArg(deviceID), occurredAt.Add(time.Minute),
+	}}
+}
+
+func syncLedgerBalanceRow(productID uuid.UUID, qty int64, occurredAt time.Time) pgx.Row {
+	return syncStaticRow{values: []any{
+		qty, pgtype.Timestamptz{Time: occurredAt, Valid: true},
 	}}
 }
 

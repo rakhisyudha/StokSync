@@ -450,6 +450,8 @@ void main() {
         PendingSyncOperationStatus.queued,
       );
       expect(store.row(_operationId(1)).attempts, 0);
+      expect(store.row(_operationId(1)).payload, contains('"name":"Product"'));
+      expect(store.row(_operationId(1)).lastError, isNull);
     });
 
     test('parks malformed pending payloads without deleting them', () async {

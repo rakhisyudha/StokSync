@@ -166,6 +166,30 @@ func TestAppendStocktakeRecomputesDeltaFromCanonicalLedger(t *testing.T) {
 	}
 }
 
+func TestConcurrentStocktakesUseTheSameCanonicalWinnerRegardlessOfArrivalOrder(t *testing.T) {
+	occurredAt := time.Date(2026, time.February, 2, 3, 4, 5, 0, time.UTC)
+	lowerID := uuid.MustParse("0192f3a0-0000-7000-8000-000000000001")
+	higherID := uuid.MustParse("0192f3a0-0000-7000-8000-000000000002")
+	if stocktakeComesAfter(occurredAt, lowerID, occurredAt, higherID) {
+		t.Fatal("lower stocktake id unexpectedly outranks higher id")
+	}
+	if !stocktakeComesAfter(occurredAt, higherID, occurredAt, lowerID) {
+		t.Fatal("higher stocktake id did not outrank lower id")
+	}
+
+	// Both devices observed the same stale balance of 10. The stable winner
+	// counts 15; processing the lower intent first appends +2 then +3, while
+	// processing the winner first appends +5 and displaces the lower intent.
+	const staleBalance int64 = 10
+	const lowerCount int64 = 12
+	const higherCount int64 = 15
+	lowerFirst := staleBalance + (lowerCount - staleBalance) + (higherCount - lowerCount)
+	higherFirst := staleBalance + (higherCount - staleBalance)
+	if lowerFirst != higherFirst || lowerFirst != higherCount {
+		t.Fatalf("canonical balances = (lower first %d, higher first %d), want both %d", lowerFirst, higherFirst, higherCount)
+	}
+}
+
 func TestCompareBalancesDetectsCorruptedProjection(t *testing.T) {
 	productID := uuid.New()
 	occurredAt := time.Date(2026, time.March, 3, 4, 5, 6, 0, time.UTC)

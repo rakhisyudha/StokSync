@@ -333,6 +333,73 @@ void main() {
     );
 
     test(
+      'conflict matrix correction appends an immutable reversal chain',
+      () async {
+        final harness = _RepositoryHarness();
+        addTearDown(harness.close);
+        final product = await harness.productRepository().create(
+          const ProductDraft(name: 'Audited coffee'),
+        );
+        final timing = MovementTiming(
+          occurredAt: DateTime.utc(2026, 9, 13, 10),
+          rawOccurredAt: DateTime.utc(2026, 9, 13, 10),
+        );
+
+        final original = await harness.movementRepository().receive(
+          productId: product.productId,
+          quantity: 6,
+          timing: timing,
+        );
+        final correction = await harness.movementRepository().reverse(
+          originalMovementId: original.movementId,
+          note: 'Correct the receive',
+          timing: timing,
+        );
+        final correctionOfCorrection = await harness
+            .movementRepository()
+            .reverse(
+              originalMovementId: correction.movementId,
+              note: 'Correction was itself mistaken',
+              timing: timing,
+            );
+
+        final rows = await harness.database
+            .select(harness.database.stockMovements)
+            .get();
+        expect(rows, hasLength(3));
+        final originalRow = rows.singleWhere(
+          (row) => row.id == original.movementId,
+        );
+        final correctionRow = rows.singleWhere(
+          (row) => row.id == correction.movementId,
+        );
+        final correctionOfCorrectionRow = rows.singleWhere(
+          (row) => row.id == correctionOfCorrection.movementId,
+        );
+        expect(originalRow.delta, 6);
+        expect(originalRow.reversesId, isNull);
+        expect(correctionRow.kind, 'adjust');
+        expect(correctionRow.delta, -6);
+        expect(correctionRow.reversesId, original.movementId);
+        expect(correctionOfCorrectionRow.kind, 'adjust');
+        expect(correctionOfCorrectionRow.delta, 6);
+        expect(correctionOfCorrectionRow.reversesId, correction.movementId);
+
+        await expectLater(
+          (harness.database.update(harness.database.stockMovements)
+                ..where((row) => row.id.equals(original.movementId)))
+              .write(const StockMovementsCompanion(delta: Value(99))),
+          throwsA(isA<Exception>()),
+        );
+        final balance = await _balanceByProduct(
+          harness.database,
+          product.productId,
+        );
+        expect(balance.qty, 6);
+      },
+    );
+
+    test(
       'keeps ledger fields immutable while allowing local sync metadata updates',
       () async {
         final harness = _RepositoryHarness();

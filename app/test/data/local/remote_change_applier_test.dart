@@ -175,6 +175,53 @@ void main() {
     );
 
     test(
+      'unions independent canonical movements and remains idempotent on replay',
+      () async {
+        final harness = _ApplierHarness();
+        addTearDown(harness.close);
+        await harness.applier.applyChange(harness.productChange(version: 1));
+
+        final deviceAMovement = harness.movementChange(
+          id: _movementId,
+          seq: 20,
+          delta: -3,
+          kind: 'issue',
+          deviceId: _deviceId,
+        );
+        final deviceBMovement = harness.movementChange(
+          id: _otherMovementId,
+          seq: 21,
+          delta: -2,
+          kind: 'issue',
+          deviceId: _otherDeviceId,
+        );
+
+        await harness.applier.applyChanges([deviceAMovement, deviceBMovement]);
+        await harness.applier.applyChanges([deviceAMovement, deviceBMovement]);
+
+        final movements = await harness.database
+            .select(harness.database.stockMovements)
+            .get();
+        expect(movements, hasLength(2));
+        expect(movements.map((movement) => movement.id).toSet(), {
+          _movementId,
+          _otherMovementId,
+        });
+        expect(
+          movements.fold<int>(0, (sum, movement) => sum + movement.delta),
+          -5,
+        );
+        expect(
+          (await harness.database
+                  .select(harness.database.productBalances)
+                  .getSingle())
+              .qty,
+          -5,
+        );
+      },
+    );
+
+    test(
       'applies movement reversals in dependency order and does not double-count replay',
       () async {
         final harness = _ApplierHarness();
@@ -221,6 +268,70 @@ void main() {
                     .get())
                 .single;
         expect(balance.qty, 0);
+      },
+    );
+
+    test(
+      'records displaced stocktake intent from a remote canonical change',
+      () async {
+        final harness = _ApplierHarness();
+        addTearDown(harness.close);
+        await harness.seedProduct();
+
+        await harness.applier.applyChange(
+          harness.movementChange(
+            id: _movementId,
+            delta: 3,
+            kind: 'stocktake',
+            countedQty: 6,
+            stocktakeOutcome: <String, Object?>{
+              'product_id': _productId,
+              'canonical_balance': 6,
+              'canonical': <String, Object?>{
+                'movement_id': _movementId,
+                'product_id': _productId,
+                'delta': 3,
+                'counted_qty': 6,
+                'occurred_at': harness.now.toIso8601String(),
+                'device_id': _deviceId,
+              },
+              'incoming': <String, Object?>{
+                'movement_id': _movementId,
+                'product_id': _productId,
+                'delta': 3,
+                'counted_qty': 6,
+                'occurred_at': harness.now.toIso8601String(),
+                'device_id': _deviceId,
+              },
+              'displaced': <Object?>[
+                <String, Object?>{
+                  'movement_id': _otherMovementId,
+                  'product_id': _productId,
+                  'delta': 2,
+                  'counted_qty': 5,
+                  'occurred_at': harness.now.toIso8601String(),
+                  'device_id': _deviceId,
+                },
+              ],
+            },
+          ),
+        );
+
+        final conflict = await harness.database
+            .select(harness.database.conflicts)
+            .getSingle();
+        expect(conflict.entity, 'stock_movement');
+        expect(conflict.entityId, _otherMovementId);
+        expect(conflict.reason, 'stocktake_displaced');
+        expect(conflict.resolutionStatus, 'unresolved');
+        expect(conflict.serverPayload, contains('canonical_balance'));
+        expect(
+          (await harness.database
+                  .select(harness.database.productBalances)
+                  .getSingle())
+              .qty,
+          3,
+        );
       },
     );
 
@@ -379,9 +490,11 @@ void main() {
 }
 
 const _deviceId = '0192f200-0000-7000-8000-000000000001';
+const _otherDeviceId = '0192f200-0000-7000-8000-000000000002';
 const _productId = '0192e1aa-0000-7000-8000-000000000001';
 const _otherProductId = '0192e1aa-0000-7000-8000-000000000002';
 const _movementId = '0192e1aa-0000-7000-8000-000000000003';
+const _otherMovementId = '0192e1aa-0000-7000-8000-000000000007';
 const _reversalId = '0192e1aa-0000-7000-8000-000000000004';
 const _missingProductId = '0192e1aa-0000-7000-8000-000000000005';
 const _missingMovementId = '0192e1aa-0000-7000-8000-000000000006';
@@ -472,6 +585,9 @@ final class _ApplierHarness {
     String? reversesId,
     DateTime? occurredAt,
     DateTime? serverCreatedAt,
+    Map<String, Object?>? stocktakeOutcome,
+    int? countedQty,
+    String deviceId = _deviceId,
   }) {
     final occurred = occurredAt ?? now;
     final created = serverCreatedAt ?? now.add(const Duration(seconds: 1));
@@ -488,10 +604,11 @@ final class _ApplierHarness {
         'occurred_at': occurred.toIso8601String(),
         'raw_occurred_at': occurred.toIso8601String(),
         'clock_offset_ms': 0,
-        'counted_qty': null,
+        'counted_qty': countedQty,
         'reverses_id': reversesId,
-        'device_id': _deviceId,
+        'device_id': deviceId,
         'server_created_at': created.toIso8601String(),
+        if (stocktakeOutcome != null) 'stocktake_outcome': stocktakeOutcome,
       },
       createdAt: created,
     );

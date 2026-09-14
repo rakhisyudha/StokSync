@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:sync_engine/sync_engine.dart';
 
 import 'stoksync_database.dart';
+import 'stocktake_conflict_store.dart';
 
 /// Applies canonical change-feed entries to the local Drift replica.
 ///
@@ -516,6 +517,7 @@ final class DriftRemoteChangeApplier {
           ),
         );
       }
+      await _recordDisplacedStocktakes(data);
       return;
     }
 
@@ -552,6 +554,28 @@ final class DriftRemoteChangeApplier {
       occurredAt: occurredAt,
       updatedAt: serverTime,
     );
+    await _recordDisplacedStocktakes(data);
+  }
+
+  Future<void> _recordDisplacedStocktakes(Map<String, Object?> data) async {
+    final outcome = data['stocktake_outcome'];
+    if (outcome == null) {
+      return;
+    }
+    if (outcome is! Map) {
+      throw _invalid('data.stocktake_outcome', 'must be an object');
+    }
+    final normalized = <String, Object?>{};
+    for (final entry in outcome.entries) {
+      if (entry.key is! String) {
+        throw _invalid('data.stocktake_outcome', 'object keys must be strings');
+      }
+      normalized[entry.key as String] = entry.value;
+    }
+    await StocktakeConflictStore(
+      _database,
+      clock: _clock,
+    ).recordOutcome(normalized);
   }
 
   Future<bool> _movementExists(String movementId) async {

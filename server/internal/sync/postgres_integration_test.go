@@ -502,7 +502,7 @@ VALUES ($1, $2, $3, $4), ($5, $2, $6, $4)`,
 		})
 	})
 
-	barcode := "offline-shared-barcode"
+	barcode := "offline-shared-barcode-" + userID.String()
 	productService, err := products.NewService(pool)
 	if err != nil {
 		t.Fatalf("products.NewService() error = %v", err)
