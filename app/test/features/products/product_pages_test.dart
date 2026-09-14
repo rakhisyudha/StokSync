@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stoksync/core/identifiers/uuid_v7_generator.dart';
+import 'package:stoksync/core/theme/app_theme.dart';
 import 'package:stoksync/core/identity/device_identity.dart';
 import 'package:stoksync/data/local/local_mutation_repositories.dart';
 import 'package:stoksync/data/local/local_query_providers.dart';
@@ -21,6 +22,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 1));
         await tester.pump();
         await harness.close();
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 1));
       });
 
@@ -123,6 +126,89 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
     },
   );
+
+  testWidgets('shows low-stock inventory cards and themed product form', (
+    tester,
+  ) async {
+    final harness = _ProductFlowHarness();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump();
+      await harness.close();
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    final created = await harness.productRepository.create(
+      const ProductDraft(name: 'Low stock beans', unit: 'bag', minStock: 4),
+    );
+
+    final product = await (harness.database.select(
+      harness.database.products,
+    )).getSingle();
+    final inventory = ProductInventory(product: product, quantity: 0);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeProductsProvider.overrideWith((_) => Stream.value([inventory])),
+          productDetailProvider(
+            created.productId,
+          ).overrideWith((_) => Stream.value(inventory)),
+          movementHistoryProvider(
+            created.productId,
+          ).overrideWith((_) => Stream.value(const <StockMovement>[])),
+          syncSummaryProvider.overrideWith(
+            (_) => Stream.value(
+              const SyncSummary(
+                cursor: 0,
+                bootstrapped: false,
+                lastSyncedAt: null,
+                lastError: null,
+                pendingOperationCount: 0,
+                unresolvedConflictCount: 0,
+              ),
+            ),
+          ),
+          localProductRepositoryProvider.overrideWithValue(
+            harness.productRepository,
+          ),
+        ],
+        child: MaterialApp(
+          theme: buildStokSyncTheme(Brightness.light),
+          darkTheme: buildStokSyncTheme(Brightness.dark),
+          home: const ProductBrowsePage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('product-list')), findsOneWidget);
+    expect(find.byKey(const Key('low-stock-summary')), findsOneWidget);
+    expect(find.byKey(Key('product-row-${created.productId}')), findsOneWidget);
+    expect(find.text('Low stock'), findsWidgets);
+    expect(find.byKey(const Key('add-product-button')), findsOneWidget);
+    expect(find.byKey(const Key('scan-product-button')), findsOneWidget);
+
+    await tester.tap(find.text('Low stock beans'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('product-stock-summary')), findsOneWidget);
+    expect(find.text('Quantity: 0 bag'), findsOneWidget);
+    expect(find.byKey(const Key('product-information-card')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('edit-product-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('product-form-card')), findsOneWidget);
+    final nameInput = tester.widget<InputDecorator>(
+      find.descendant(
+        of: find.byKey(const Key('product-name-field')),
+        matching: find.byType(InputDecorator),
+      ),
+    );
+    expect(nameInput.decoration.filled, isTrue);
+    expect(find.byKey(const Key('product-form-stock-card')), findsOneWidget);
+  });
 }
 
 final class _ProductFlowHarness {

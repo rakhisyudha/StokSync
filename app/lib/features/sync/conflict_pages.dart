@@ -18,41 +18,156 @@ class ConflictListPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Conflicts')),
       body: conflicts.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) =>
-            const Center(child: Text('Local conflict history is unavailable.')),
+        loading: () => const _ConflictStateMessage(
+          key: Key('conflicts-loading-state'),
+          icon: Icons.warning_amber_outlined,
+          message: 'Loading conflict history…',
+          loading: true,
+        ),
+        error: (_, _) => const _ConflictStateMessage(
+          key: Key('conflicts-error-state'),
+          icon: Icons.error_outline,
+          message: 'Local conflict history is unavailable.',
+          isError: true,
+        ),
         data: (values) {
           final unresolvedCount = values
               .where((conflict) => conflict.resolutionStatus == 'unresolved')
               .length;
           if (values.isEmpty) {
-            return const Center(
-              child: Text('No conflicts recorded on this device.'),
+            return const _ConflictStateMessage(
+              key: Key('conflicts-empty-state'),
+              icon: Icons.check_circle_outline,
+              message: 'No conflicts recorded on this device.',
+              detail:
+                  'Conflicts will appear here when local work needs review.',
             );
           }
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              Text(
-                '$unresolvedCount unresolved conflict${unresolvedCount == 1 ? '' : 's'}',
-                key: const Key('unresolved-conflict-heading'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              ...values.map(
-                (conflict) => _ConflictListTile(
-                  conflict: conflict,
-                  onTap: () => Navigator.of(context).push<void>(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ConflictDetailPage(operationId: conflict.opId),
-                    ),
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            itemCount: values.length + 1,
+            separatorBuilder: (_, index) =>
+                SizedBox(height: index == 0 ? 12 : 8),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return _ConflictListHeader(unresolvedCount: unresolvedCount);
+              }
+              final conflict = values[index - 1];
+              return _ConflictListTile(
+                conflict: conflict,
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        ConflictDetailPage(operationId: conflict.opId),
                   ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+final class _ConflictStateMessage extends StatelessWidget {
+  const _ConflictStateMessage({
+    super.key,
+    required this.icon,
+    required this.message,
+    this.detail,
+    this.loading = false,
+    this.isError = false,
+  });
+
+  final IconData icon;
+  final String message;
+  final String? detail;
+  final bool loading;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final iconColor = isError ? colorScheme.error : colorScheme.primary;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (loading)
+              CircularProgressIndicator(color: colorScheme.primary)
+            else
+              Icon(icon, size: 48, color: iconColor),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+            if (detail != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                detail!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
-          );
-        },
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConflictListHeader extends StatelessWidget {
+  const _ConflictListHeader({required this.unresolvedCount});
+
+  final int unresolvedCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final conflictWord = unresolvedCount == 1 ? 'conflict' : 'conflicts';
+    return Card(
+      color: colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              unresolvedCount == 0
+                  ? Icons.check_circle_outline
+                  : Icons.warning_amber_outlined,
+              color: unresolvedCount == 0
+                  ? colorScheme.primary
+                  : colorScheme.error,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$unresolvedCount unresolved $conflictWord',
+                    key: const Key('unresolved-conflict-heading'),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Review local intent and canonical server state before choosing a follow-up action.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -67,18 +182,50 @@ class _ConflictListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final unresolved = conflict.resolutionStatus == 'unresolved';
+    final colorScheme = Theme.of(context).colorScheme;
+    final iconColor = unresolved
+        ? colorScheme.onErrorContainer
+        : colorScheme.onSecondaryContainer;
+    final iconBackground = unresolved
+        ? colorScheme.errorContainer
+        : colorScheme.secondaryContainer;
+
     return Card(
       key: Key('conflict-row-${conflict.opId}'),
-      margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         onTap: onTap,
-        title: Text(conflictReasonLabel(conflict.reason)),
-        subtitle: Text(
-          '${conflict.entity} · ${_statusLabel(conflict.resolutionStatus)}',
+        leading: CircleAvatar(
+          backgroundColor: iconBackground,
+          foregroundColor: iconColor,
+          child: Icon(
+            unresolved
+                ? Icons.warning_amber_outlined
+                : Icons.check_circle_outline,
+          ),
         ),
-        trailing: unresolved
-            ? const Icon(Icons.warning_amber_outlined)
-            : const Icon(Icons.check_circle_outline),
+        title: Text(
+          conflictReasonLabel(conflict.reason),
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${conflict.entity} · ${_statusLabel(conflict.resolutionStatus)}',
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _formatUtc(conflict.createdAt),
+                key: Key('conflict-timestamp-${conflict.opId}'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right),
       ),
     );
   }
@@ -96,13 +243,26 @@ class ConflictDetailPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Conflict details')),
       body: conflict.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => const Center(
-          child: Text('Local conflict details are unavailable.'),
+        loading: () => const _ConflictStateMessage(
+          key: Key('conflict-detail-loading-state'),
+          icon: Icons.description_outlined,
+          message: 'Loading conflict details…',
+          loading: true,
+        ),
+        error: (_, _) => const _ConflictStateMessage(
+          key: Key('conflict-detail-error-state'),
+          icon: Icons.error_outline,
+          message: 'Local conflict details are unavailable.',
+          isError: true,
         ),
         data: (value) {
           if (value == null) {
-            return const Center(child: Text('Conflict was not found locally.'));
+            return const _ConflictStateMessage(
+              key: Key('conflict-detail-not-found-state'),
+              icon: Icons.search_off,
+              message: 'Conflict was not found locally.',
+              isError: true,
+            );
           }
           return _ConflictDetailContent(conflict: value);
         },
@@ -122,28 +282,52 @@ class _ConflictDetailContent extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                conflictReasonLabel(conflict.reason),
-                key: const Key('conflict-reason'),
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    conflictReasonLabel(conflict.reason),
+                    key: const Key('conflict-reason'),
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Chip(
+                  key: const Key('conflict-resolution-status'),
+                  label: Text(_statusLabel(conflict.resolutionStatus)),
+                ),
+              ],
             ),
-            Chip(
-              key: const Key('conflict-resolution-status'),
-              label: Text(_statusLabel(conflict.resolutionStatus)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _MetadataRow(
+                  label: 'Reason code',
+                  value: conflict.reason,
+                  valueKey: const Key('conflict-reason-code'),
+                ),
+                _MetadataRow(
+                  label: 'Entity',
+                  value: '${conflict.entity} ${conflict.entityId}',
+                ),
+                _MetadataRow(
+                  label: 'Recorded',
+                  value: _formatUtc(conflict.createdAt),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Reason code: ${conflict.reason}',
-          key: const Key('conflict-reason-code'),
-        ),
-        Text('Entity: ${conflict.entity} ${conflict.entityId}'),
-        Text('Recorded: ${_formatUtc(conflict.createdAt)}'),
         const SizedBox(height: 20),
         _PayloadSection(
           key: const Key('base-payload'),
@@ -175,6 +359,31 @@ class _ConflictDetailContent extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _MetadataRow extends StatelessWidget {
+  const _MetadataRow({required this.label, required this.value, this.valueKey});
+
+  final String label;
+  final String value;
+  final Key? valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 112,
+            child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+          ),
+          Expanded(child: SelectableText(value, key: valueKey)),
+        ],
+      ),
     );
   }
 }
@@ -361,27 +570,199 @@ class _PayloadSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final formatted = _formatPayload(payload);
+    final sectionId = key is ValueKey<String>
+        ? (key as ValueKey<String>).value
+        : title.toLowerCase().replaceAll(' ', '-');
+    final hasPayload = payload != null && payload!.trim().isNotEmpty;
+    final decoded = _decodePayload(payload);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            SelectableText(
-              formatted ?? emptyText,
-              key: Key(
-                '${key is ValueKey<String> ? (key as ValueKey<String>).value : title}-content',
+            Divider(color: Theme.of(context).colorScheme.outlineVariant),
+            const SizedBox(height: 4),
+            if (!hasPayload)
+              Text(emptyText, key: Key('$sectionId-content'))
+            else
+              _PayloadFields(
+                key: Key('$sectionId-content'),
+                sectionId: sectionId,
+                decoded: decoded,
               ),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _PayloadFields extends StatelessWidget {
+  const _PayloadFields({
+    super.key,
+    required this.sectionId,
+    required this.decoded,
+  });
+
+  final String sectionId;
+  final Object? decoded;
+
+  @override
+  Widget build(BuildContext context) {
+    final fields = _payloadFields(decoded);
+    if (fields == null) {
+      return _PayloadField(
+        fieldKey: Key('$sectionId-field-payload'),
+        label: 'Payload',
+        value: _formatPayloadValue(decoded),
+      );
+    }
+    if (fields.isEmpty) {
+      return _PayloadField(
+        fieldKey: Key('$sectionId-field-payload'),
+        label: 'Payload',
+        value: 'Object is empty.',
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final entry in fields.entries)
+          _PayloadField(
+            fieldKey: Key('$sectionId-field-${entry.key}'),
+            label: _payloadLabel(entry.key),
+            value: _formatPayloadValue(entry.value),
+          ),
+      ],
+    );
+  }
+}
+
+class _PayloadField extends StatelessWidget {
+  const _PayloadField({
+    required this.fieldKey,
+    required this.label,
+    required this.value,
+  });
+
+  final Key fieldKey;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 136,
+            child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              key: fieldKey,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+const _payloadFieldLabels = <String, String>{
+  'id': 'ID',
+  'product_id': 'Product ID',
+  'name': 'Name',
+  'barcode': 'Barcode',
+  'sku': 'SKU',
+  'description': 'Description',
+  'category': 'Category',
+  'unit': 'Unit',
+  'min_stock': 'Minimum stock',
+  'version': 'Version',
+  'deleted_at': 'Deleted at',
+  'delta': 'Quantity change',
+  'kind': 'Movement type',
+  'note': 'Note',
+  'occurred_at': 'Occurred at',
+  'raw_occurred_at': 'Original occurred at',
+  'clock_offset_ms': 'Clock offset (ms)',
+  'counted_qty': 'Counted quantity',
+  'reverses_id': 'Reverses movement ID',
+  'device_id': 'Originating device ID',
+  'server_created_at': 'Server received at',
+  'created_at': 'Created at',
+  'updated_at': 'Last updated at',
+  'updated_by': 'Last updated by',
+  'sync_status': 'Sync status',
+  'base_version': 'Base version',
+  'op_id': 'Operation ID',
+  'operation_id': 'Operation ID',
+  'op': 'Operation',
+  'operation': 'Operation',
+  'entity': 'Entity',
+  'entity_id': 'Entity ID',
+  'reason': 'Conflict reason',
+  'status': 'Status',
+  'resolution_status': 'Resolution status',
+  'local_seq': 'Local sequence',
+  'attempts': 'Retry attempts',
+  'next_attempt_at': 'Next attempt at',
+  'last_error': 'Last error',
+  'server_state': 'Canonical server state',
+  'stocktake_outcome': 'Stocktake outcome',
+  'user_id': 'User ID',
+  'schema_version': 'Schema version',
+  'server_time': 'Server time',
+  'seq': 'Sequence',
+  'cursor': 'Cursor',
+  'has_more': 'More changes',
+};
+
+String _payloadLabel(String key) => _payloadFieldLabels[key] ?? key;
+
+Object? _decodePayload(String? payload) {
+  if (payload == null || payload.trim().isEmpty) {
+    return null;
+  }
+  try {
+    return jsonDecode(payload);
+  } on FormatException {
+    return payload;
+  }
+}
+
+Map<String, Object?>? _payloadFields(Object? decoded) {
+  if (decoded is! Map) {
+    return null;
+  }
+  return <String, Object?>{
+    for (final entry in decoded.entries) entry.key.toString(): entry.value,
+  };
+}
+
+String _formatPayloadValue(Object? value) {
+  if (value == null) {
+    return 'null';
+  }
+  if (value is String) {
+    return value;
+  }
+  if (value is num || value is bool) {
+    return value.toString();
+  }
+  try {
+    return const JsonEncoder.withIndent('  ').convert(value);
+  } on JsonUnsupportedObjectError {
+    return value.toString();
   }
 }
 
@@ -404,18 +785,6 @@ String _statusLabel(String status) {
     'resolved' => 'Resolved',
     _ => status,
   };
-}
-
-String? _formatPayload(String? payload) {
-  if (payload == null || payload.trim().isEmpty) {
-    return null;
-  }
-  try {
-    final decoded = jsonDecode(payload);
-    return const JsonEncoder.withIndent('  ').convert(decoded);
-  } on FormatException {
-    return payload;
-  }
 }
 
 String _formatUtc(DateTime timestamp) {

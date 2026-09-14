@@ -70,16 +70,28 @@ class _MovementEntryPageState extends ConsumerState<MovementEntryPage> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.mode.title)),
       body: inventory.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) =>
-            const Center(child: Text('Local product details are unavailable.')),
+        loading: () => const _MovementStateMessage(
+          key: Key('movement-entry-loading-state'),
+          icon: Icons.hourglass_top,
+          message: 'Loading product details…',
+          loading: true,
+        ),
+        error: (_, _) => const _MovementStateMessage(
+          key: Key('movement-entry-error-state'),
+          icon: Icons.error_outline,
+          message: 'Local product details are unavailable.',
+        ),
         data: (productInventory) {
           if (productInventory == null) {
-            return const Center(child: Text('Product was not found locally.'));
+            return const _MovementStateMessage(
+              icon: Icons.search_off,
+              message: 'Product was not found locally.',
+            );
           }
           if (productInventory.product.deletedAt != null) {
-            return const Center(
-              child: Text('Deleted products cannot receive stock changes.'),
+            return const _MovementStateMessage(
+              icon: Icons.delete_outline,
+              message: 'Deleted products cannot receive stock changes.',
             );
           }
           return _buildForm(context, productInventory);
@@ -89,6 +101,8 @@ class _MovementEntryPageState extends ConsumerState<MovementEntryPage> {
   }
 
   Widget _buildForm(BuildContext context, ProductInventory inventory) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final valueLabel = switch (widget.mode) {
       MovementEntryMode.receive || MovementEntryMode.issue => 'Quantity',
       MovementEntryMode.adjustment => 'Adjustment delta',
@@ -111,51 +125,148 @@ class _MovementEntryPageState extends ConsumerState<MovementEntryPage> {
 
     return Form(
       key: _formKey,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
+      child: Column(
         children: [
-          Card(
-            child: ListTile(
-              key: const Key('movement-current-balance'),
-              title: const Text('Current balance'),
-              subtitle: Text('${inventory.quantity} ${inventory.product.unit}'),
+          Expanded(
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+              children: [
+                Text(widget.mode.title, style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 6),
+                Text(
+                  _movementGuidance(widget.mode),
+                  key: const Key('movement-entry-guidance'),
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Card(
+                  key: const Key('movement-current-balance'),
+                  color: colors.primaryContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.account_balance_wallet_outlined,
+                          color: colors.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Current balance',
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: colors.onPrimaryContainer,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${inventory.quantity} ${inventory.product.unit}',
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  color: colors.onPrimaryContainer,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          _movementModeIcon(widget.mode),
+                          color: colors.onPrimaryContainer,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  key: const Key('movement-entry-form-card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Movement details',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          key: valueKey,
+                          controller: _valueController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            signed: true,
+                            decimal: false,
+                          ),
+                          textInputAction: TextInputAction.next,
+                          decoration: _movementFieldDecoration(
+                            context,
+                            label: valueLabel,
+                            hint: valueHint,
+                          ),
+                          validator: (value) =>
+                              _validateValue(value, inventory.quantity),
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          key: const Key('movement-note-field'),
+                          controller: _noteController,
+                          textInputAction: TextInputAction.done,
+                          maxLines: 3,
+                          maxLength: 500,
+                          decoration: _movementFieldDecoration(
+                            context,
+                            label: 'Note (optional)',
+                            hint: 'Explain this stock change',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          TextFormField(
-            key: valueKey,
-            controller: _valueController,
-            keyboardType: const TextInputType.numberWithOptions(
-              signed: true,
-              decimal: false,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('save-movement-button'),
+                style:
+                    FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(54),
+                    ).copyWith(
+                      backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+                        (states) =>
+                            _isSaving && states.contains(WidgetState.disabled)
+                            ? colors.primary
+                            : null,
+                      ),
+                      foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+                        (states) =>
+                            _isSaving && states.contains(WidgetState.disabled)
+                            ? colors.onPrimary
+                            : null,
+                      ),
+                    ),
+                onPressed: _isSaving ? null : _save,
+                icon: _isSaving
+                    ? SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          color: colors.onPrimary,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_isSaving ? 'Saving…' : widget.mode.actionLabel),
+              ),
             ),
-            textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: valueLabel,
-              hintText: valueHint,
-              border: const OutlineInputBorder(),
-            ),
-            validator: (value) => _validateValue(value, inventory.quantity),
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            key: const Key('movement-note-field'),
-            controller: _noteController,
-            textInputAction: TextInputAction.done,
-            maxLines: 3,
-            maxLength: 500,
-            decoration: const InputDecoration(
-              labelText: 'Note (optional)',
-              hintText: 'Explain this stock change',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            key: const Key('save-movement-button'),
-            onPressed: _isSaving ? null : _save,
-            icon: const Icon(Icons.check),
-            label: Text(_isSaving ? 'Saving…' : widget.mode.actionLabel),
           ),
         ],
       ),
@@ -288,44 +399,146 @@ class _MovementReversalPageState extends ConsumerState<MovementReversalPage> {
   @override
   Widget build(BuildContext context) {
     final movement = widget.movement;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Reverse movement')),
       body: Form(
         key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        child: Column(
           children: [
-            Card(
-              child: ListTile(
-                title: Text(_movementTitle(movement.kind)),
-                subtitle: Text(
-                  'Original delta: ${_signedQuantity(movement.delta)}',
+            Expanded(
+              child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                children: [
+                  Text('Review reversal', style: theme.textTheme.headlineSmall),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Append a correction without changing the original ledger entry.',
+                    key: const Key('movement-reversal-guidance'),
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Card(
+                    key: const Key('movement-reversal-summary-card'),
+                    color: colors.secondaryContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.history,
+                            color: colors.onSecondaryContainer,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Original movement',
+                                  style: theme.textTheme.labelLarge?.copyWith(
+                                    color: colors.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _movementTitle(movement.kind),
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: colors.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Original delta: ${_signedQuantity(movement.delta)}',
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: colors.onSecondaryContainer,
+                                  ),
+                                ),
+                                if (movement.note != null &&
+                                    movement.note!.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Note: ${movement.note}',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: colors.onSecondaryContainer,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    key: const Key('movement-reversal-form-card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: TextFormField(
+                        key: const Key('movement-reversal-note-field'),
+                        controller: _noteController,
+                        textInputAction: TextInputAction.done,
+                        maxLines: 3,
+                        maxLength: 500,
+                        decoration: _movementFieldDecoration(
+                          context,
+                          label: 'Reversal note (optional)',
+                          hint: 'Explain why this movement is being reversed',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const Key('save-reversal-button'),
+                  style:
+                      FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(54),
+                      ).copyWith(
+                        backgroundColor:
+                            WidgetStateProperty.resolveWith<Color?>(
+                              (states) =>
+                                  _isSaving &&
+                                      states.contains(WidgetState.disabled)
+                                  ? colors.primary
+                                  : null,
+                            ),
+                        foregroundColor:
+                            WidgetStateProperty.resolveWith<Color?>(
+                              (states) =>
+                                  _isSaving &&
+                                      states.contains(WidgetState.disabled)
+                                  ? colors.onPrimary
+                                  : null,
+                            ),
+                      ),
+                  onPressed: _isSaving ? null : _save,
+                  icon: _isSaving
+                      ? SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            color: colors.onPrimary,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.undo),
+                  label: Text(_isSaving ? 'Saving…' : 'Reverse movement'),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'A new adjustment will be appended with the opposite delta. The original movement will remain unchanged.',
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              key: const Key('movement-reversal-note-field'),
-              controller: _noteController,
-              textInputAction: TextInputAction.done,
-              maxLines: 3,
-              maxLength: 500,
-              decoration: const InputDecoration(
-                labelText: 'Reversal note (optional)',
-                hintText: 'Explain why this movement is being reversed',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              key: const Key('save-reversal-button'),
-              onPressed: _isSaving ? null : _save,
-              icon: const Icon(Icons.undo),
-              label: Text(_isSaving ? 'Saving…' : 'Reverse movement'),
             ),
           ],
         ),
@@ -377,6 +590,93 @@ class _MovementReversalPageState extends ConsumerState<MovementReversalPage> {
       }
     }
   }
+}
+
+class _MovementStateMessage extends StatelessWidget {
+  const _MovementStateMessage({
+    super.key,
+    required this.icon,
+    required this.message,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final String message;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (loading)
+              const CircularProgressIndicator()
+            else
+              Icon(icon, size: 48, color: colors.error),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _movementGuidance(MovementEntryMode mode) {
+  return switch (mode) {
+    MovementEntryMode.receive =>
+      'Add incoming stock to the current balance. Use a note for the source or delivery reference.',
+    MovementEntryMode.issue =>
+      'Record stock leaving inventory. Enter the quantity to subtract from the current balance.',
+    MovementEntryMode.adjustment =>
+      'Apply a signed correction when the ledger needs an explicit increase or decrease.',
+    MovementEntryMode.stocktake =>
+      'Enter the physical count. StokSync records only the delta needed to reach it.',
+  };
+}
+
+IconData _movementModeIcon(MovementEntryMode mode) {
+  return switch (mode) {
+    MovementEntryMode.receive => Icons.add_box_outlined,
+    MovementEntryMode.issue => Icons.outbox_outlined,
+    MovementEntryMode.adjustment => Icons.tune,
+    MovementEntryMode.stocktake => Icons.fact_check_outlined,
+  };
+}
+
+InputDecoration _movementFieldDecoration(
+  BuildContext context, {
+  required String label,
+  required String hint,
+}) {
+  final colors = Theme.of(context).colorScheme;
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(12),
+    borderSide: BorderSide(color: colors.outlineVariant),
+  );
+  return InputDecoration(
+    labelText: label,
+    hintText: hint,
+    filled: true,
+    fillColor: colors.surfaceContainerHighest,
+    border: border,
+    enabledBorder: border,
+    focusedBorder: border.copyWith(
+      borderSide: BorderSide(color: colors.primary, width: 2),
+    ),
+    errorBorder: border.copyWith(borderSide: BorderSide(color: colors.error)),
+    focusedErrorBorder: border.copyWith(
+      borderSide: BorderSide(color: colors.error, width: 2),
+    ),
+  );
 }
 
 String _movementTitle(String kind) {

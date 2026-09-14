@@ -12,7 +12,7 @@ import 'data/local/local_query_providers.dart';
 import 'data/remote/auth_client.dart';
 import 'data/remote/sync_session_store.dart';
 import 'features/auth/auth_pages.dart';
-import 'features/products/product_pages.dart';
+import 'features/navigation/authenticated_root_shell.dart';
 import 'features/sync/sync_runtime_composition.dart';
 import 'features/sync/sync_trigger_providers.dart';
 
@@ -58,7 +58,9 @@ Future<void> main() async {
           deviceId: deviceId,
           deviceName: 'StokSync device',
           platform: defaultTargetPlatform.name,
-          authenticatedChild: const SyncTriggerHost(child: ProductBrowsePage()),
+          authenticatedChild: const SyncTriggerHost(
+            child: AuthenticatedRootShell(),
+          ),
         ),
       ),
     ),
@@ -82,7 +84,7 @@ class StokSyncApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       home:
           authenticatedHome ??
-          const SyncTriggerHost(child: ProductBrowsePage()),
+          const SyncTriggerHost(child: AuthenticatedRootShell()),
     );
   }
 }

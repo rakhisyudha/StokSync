@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stoksync/data/local/local_query_providers.dart';
+import 'package:stoksync/features/products/product_pages.dart';
 import 'package:stoksync/main.dart';
 
 void main() {
@@ -35,7 +36,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Products'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ProductBrowsePage),
+        matching: find.text('Products'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('sync-status-card')), findsOneWidget);
     expect(
       find.descendant(

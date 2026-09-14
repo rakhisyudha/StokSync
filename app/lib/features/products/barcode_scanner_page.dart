@@ -148,17 +148,26 @@ class _BarcodeScannerPageState extends ConsumerState<BarcodeScannerPage> {
   @override
   Widget build(BuildContext context) {
     final activeProducts = ref.watch(activeProductsProvider);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan barcode or QR code')),
+      appBar: AppBar(
+        title: const Text('Scan barcode or QR code'),
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
+        surfaceTintColor: colorScheme.surfaceTint,
+      ),
       body: activeProducts.when(
         loading: () => const _ScannerStatus(
           title: 'Loading local catalog…',
           message: 'The camera will be ready when local products are loaded.',
+          icon: Icons.inventory_2_outlined,
         ),
         error: (_, _) => const _ScannerStatus(
           title: 'Local catalog unavailable',
           message: 'Close this screen and try again after local data is ready.',
+          icon: Icons.inventory_2_outlined,
+          isError: true,
         ),
         data: (products) => _buildScanner(context, products),
       ),
@@ -177,27 +186,8 @@ class _BarcodeScannerPageState extends ConsumerState<BarcodeScannerPage> {
           context,
           (capture) => _handleCapture(capture, activeProducts),
         ),
-        const IgnorePointer(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              minimum: EdgeInsets.all(16),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.all(Radius.circular(8)),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  child: Text(
-                    'Point the camera at a product barcode or QR code.',
-                    style: TextStyle(color: Colors.white),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            ),
-          ),
+        Positioned.fill(
+          child: _ScannerOverlay(key: const Key('scanner-overlay')),
         ),
       ],
     );
@@ -277,6 +267,109 @@ class _BarcodeScannerPageState extends ConsumerState<BarcodeScannerPage> {
   }
 }
 
+/// Provides camera guidance without obscuring the camera preview.
+final class _ScannerOverlay extends StatelessWidget {
+  const _ScannerOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Semantics(
+      container: true,
+      label: 'Barcode scanner guidance',
+      child: IgnorePointer(
+        child: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            children: [
+              _ScannerOverlayPanel(
+                key: const Key('scanner-overlay-badge'),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.qr_code_scanner, color: colorScheme.primary),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Scan a barcode or QR code',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: FractionallySizedBox(
+                    widthFactor: 0.86,
+                    child: AspectRatio(
+                      aspectRatio: 1.7,
+                      child: DecoratedBox(
+                        key: const Key('scanner-frame'),
+                        decoration: BoxDecoration(
+                          // Camera guidance uses only theme-derived translucent
+                          // surfaces so it stays legible without a second palette.
+                          color: colorScheme.surface.withValues(alpha: 0.08),
+                          border: Border.all(
+                            color: colorScheme.primary,
+                            width: 3,
+                          ),
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colorScheme.shadow.withValues(alpha: 0.55),
+                              blurRadius: 12,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _ScannerOverlayPanel(
+                key: const Key('scanner-instructions'),
+                child: Text(
+                  'Point the camera at a product barcode or QR code.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurface,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _ScannerOverlayPanel extends StatelessWidget {
+  const _ScannerOverlayPanel({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.94),
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: child,
+      ),
+    );
+  }
+}
+
 /// Displays the scanner camera and requests permission through mobile_scanner.
 class BarcodeCameraView extends StatefulWidget {
   const BarcodeCameraView({super.key, required this.onDetect});
@@ -296,13 +389,31 @@ class _BarcodeCameraViewState extends State<BarcodeCameraView> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return MobileScanner(
       key: const Key('mobile-scanner'),
       controller: _controller,
       onDetect: widget.onDetect,
-      placeholderBuilder: (_) => const ColoredBox(
-        color: Colors.black,
-        child: Center(child: CircularProgressIndicator(color: Colors.white)),
+      placeholderBuilder: (_) => ColoredBox(
+        key: const Key('scanner-camera-placeholder'),
+        color: colorScheme.surface,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: colorScheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Starting camera…',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
       errorBuilder: (context, error) =>
           BarcodeScannerErrorView(error: error, onRetry: _retry),
@@ -342,43 +453,57 @@ class BarcodeScannerErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return ColoredBox(
-      color: Colors.black,
+      color: colorScheme.surface,
       child: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.camera_alt_outlined,
-                color: Colors.white,
-                size: 48,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                scannerErrorTitle(error.errorCode),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Card(
+              key: const Key('scanner-error-panel'),
+              color: colorScheme.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.camera_alt_outlined,
+                      color: colorScheme.onErrorContainer,
+                      size: 48,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      scannerErrorTitle(error.errorCode),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: colorScheme.onErrorContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      scannerErrorMessage(error.errorCode),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onErrorContainer,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      key: const Key('scanner-retry-button'),
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try again'),
+                    ),
+                  ],
                 ),
-                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
-              Text(
-                scannerErrorMessage(error.errorCode),
-                style: const TextStyle(color: Colors.white70),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                key: const Key('scanner-retry-button'),
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try again'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -405,23 +530,71 @@ String scannerErrorMessage(MobileScannerErrorCode errorCode) {
 }
 
 final class _ScannerStatus extends StatelessWidget {
-  const _ScannerStatus({required this.title, required this.message});
+  const _ScannerStatus({
+    required this.title,
+    required this.message,
+    required this.icon,
+    this.isError = false,
+  });
 
   final String title;
   final String message;
+  final IconData icon;
+  final bool isError;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(message, textAlign: TextAlign.center),
-          ],
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final containerColor = isError
+        ? colorScheme.errorContainer
+        : colorScheme.surfaceContainerHighest;
+    final contentColor = isError
+        ? colorScheme.onErrorContainer
+        : colorScheme.onSurface;
+
+    return ColoredBox(
+      color: colorScheme.surface,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Card(
+            key: Key(
+              isError ? 'scanner-catalog-error' : 'scanner-catalog-loading',
+            ),
+            color: containerColor,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isError) ...[
+                    CircularProgressIndicator(color: colorScheme.primary),
+                    const SizedBox(height: 20),
+                  ],
+                  Icon(icon, color: contentColor, size: 40),
+                  const SizedBox(height: 16),
+                  Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: contentColor,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isError
+                          ? colorScheme.onErrorContainer
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -128,62 +128,242 @@ final class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: colorScheme.outlineVariant),
+    );
+    final focusedInputBorder = inputBorder.copyWith(
+      borderSide: BorderSide(color: colorScheme.primary, width: 2),
+    );
+    final errorInputBorder = inputBorder.copyWith(
+      borderSide: BorderSide(color: colorScheme.error, width: 2),
+    );
+    final inputDecoration = InputDecoration(
+      filled: true,
+      fillColor: colorScheme.surfaceContainerHighest,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      border: inputBorder,
+      enabledBorder: inputBorder,
+      focusedBorder: focusedInputBorder,
+      errorBorder: errorInputBorder,
+      focusedErrorBorder: errorInputBorder,
+      errorStyle: textTheme.bodySmall?.copyWith(color: colorScheme.error),
+      prefixIconColor: colorScheme.onSurfaceVariant,
+    );
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in to StokSync')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(
-              'Sign in to synchronize this device while keeping inventory available offline.',
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 24),
-            TextFormField(
-              key: const Key('login-email-field'),
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.next,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
+      appBar: AppBar(
+        title: const Text('StokSync'),
+        automaticallyImplyLeading: false,
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: AutofillGroup(
+              child: Semantics(
+                container: true,
+                label: 'Sign-in form',
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                    children: [
+                      Align(
+                        alignment: Alignment.center,
+                        child: DecoratedBox(
+                          key: const Key('login-brand-mark'),
+                          decoration: BoxDecoration(
+                            color: colorScheme.primaryContainer,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Icon(
+                              Icons.inventory_2_outlined,
+                              size: 32,
+                              color: colorScheme.onPrimaryContainer,
+                              semanticLabel: 'StokSync inventory',
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Welcome back',
+                        key: const Key('login-title'),
+                        textAlign: TextAlign.center,
+                        style: textTheme.headlineSmall?.copyWith(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Sign in to synchronize this device while keeping inventory available offline.',
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodyLarge?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      TextFormField(
+                        key: const Key('login-email-field'),
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        autofillHints: const [AutofillHints.email],
+                        scrollPadding: const EdgeInsets.only(bottom: 120),
+                        decoration: inputDecoration.copyWith(
+                          labelText: 'Email',
+                          hintText: 'you@example.com',
+                          prefixIcon: const Icon(Icons.alternate_email),
+                        ),
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                            ? 'Email is required.'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        key: const Key('login-password-field'),
+                        controller: _passwordController,
+                        obscureText: true,
+                        enableSuggestions: false,
+                        autocorrect: false,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
+                        scrollPadding: const EdgeInsets.only(bottom: 120),
+                        decoration: inputDecoration.copyWith(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                        ),
+                        onFieldSubmitted: (_) => _submit(),
+                        validator: (value) => value == null || value.isEmpty
+                            ? 'Password is required.'
+                            : null,
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 20),
+                        Semantics(
+                          container: true,
+                          liveRegion: true,
+                          label: 'Sign-in error: ${_error!}',
+                          child: ExcludeSemantics(
+                            child: Container(
+                              key: const Key('login-error-banner'),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: colorScheme.errorContainer,
+                                border: Border.all(color: colorScheme.error),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline_rounded,
+                                    color: colorScheme.onErrorContainer,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _error!,
+                                      key: const Key('login-error'),
+                                      style: textTheme.bodyMedium?.copyWith(
+                                        color: colorScheme.onErrorContainer,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 28),
+                      Semantics(
+                        liveRegion: _isSubmitting,
+                        label: _isSubmitting ? 'Signing in' : null,
+                        child: FilledButton(
+                          key: const Key('login-submit-button'),
+                          onPressed: _isSubmitting ? null : _submit,
+                          style:
+                              FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(56),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                textStyle: textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ).copyWith(
+                                backgroundColor:
+                                    WidgetStateProperty.resolveWith<Color?>(
+                                      (states) =>
+                                          _isSubmitting &&
+                                              states.contains(
+                                                WidgetState.disabled,
+                                              )
+                                          ? colorScheme.primary
+                                          : null,
+                                    ),
+                                foregroundColor:
+                                    WidgetStateProperty.resolveWith<Color?>(
+                                      (states) =>
+                                          _isSubmitting &&
+                                              states.contains(
+                                                WidgetState.disabled,
+                                              )
+                                          ? colorScheme.onPrimary
+                                          : null,
+                                    ),
+                              ),
+                          child: AnimatedSwitcher(
+                            duration: Durations.short4,
+                            child: _isSubmitting
+                                ? Row(
+                                    key: const ValueKey('login-loading'),
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox.square(
+                                        dimension: 20,
+                                        child: CircularProgressIndicator(
+                                          key: const Key(
+                                            'login-loading-indicator',
+                                          ),
+                                          strokeWidth: 2,
+                                          color: colorScheme.onPrimary,
+                                          semanticsLabel: 'Signing in',
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text('Signing in…'),
+                                    ],
+                                  )
+                                : const Text(
+                                    'Sign in',
+                                    key: ValueKey('login-idle'),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Email is required.'
-                  : null,
             ),
-            const SizedBox(height: 16),
-            TextFormField(
-              key: const Key('login-password-field'),
-              controller: _passwordController,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                border: OutlineInputBorder(),
-              ),
-              onFieldSubmitted: (_) => _submit(),
-              validator: (value) => value == null || value.isEmpty
-                  ? 'Password is required.'
-                  : null,
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                _error!,
-                key: const Key('login-error'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            const SizedBox(height: 24),
-            FilledButton(
-              key: const Key('login-submit-button'),
-              onPressed: _isSubmitting ? null : _submit,
-              child: Text(_isSubmitting ? 'Signing in…' : 'Sign in'),
-            ),
-          ],
+          ),
         ),
       ),
     );

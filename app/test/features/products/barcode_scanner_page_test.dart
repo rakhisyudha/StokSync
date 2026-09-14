@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:stoksync/core/identifiers/uuid_v7_generator.dart';
 import 'package:stoksync/core/identity/device_identity.dart';
+import 'package:stoksync/core/theme/app_theme.dart';
 import 'package:stoksync/data/local/local_mutation_repositories.dart';
 import 'package:stoksync/data/local/local_query_providers.dart';
 import 'package:stoksync/data/local/stoksync_database.dart';
@@ -76,12 +77,14 @@ void main() {
     },
   );
 
-  testWidgets('explains denied camera permission and offers retry', (
+  testWidgets('uses theme roles for the camera permission error and retry', (
     tester,
   ) async {
     var retried = false;
+    final theme = buildStokSyncTheme(Brightness.dark);
     await tester.pumpWidget(
       MaterialApp(
+        theme: theme,
         home: BarcodeScannerErrorView(
           error: const MobileScannerException(
             errorCode: MobileScannerErrorCode.permissionDenied,
@@ -96,8 +99,73 @@ void main() {
       find.text('Allow camera access in device settings, then try again.'),
       findsOneWidget,
     );
+    final panel = tester.widget<Card>(
+      find.byKey(const Key('scanner-error-panel')),
+    );
+    expect(panel.color, theme.colorScheme.errorContainer);
+    final title = tester.widget<Text>(find.text('Camera permission required'));
+    expect(title.style?.color, theme.colorScheme.onErrorContainer);
+
     await tester.tap(find.byKey(const Key('scanner-retry-button')));
     expect(retried, isTrue);
+  });
+
+  testWidgets('uses themed app bar, frame, and scanner guidance overlay', (
+    tester,
+  ) async {
+    final theme = buildStokSyncTheme(Brightness.light);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeProductsProvider.overrideWith(
+            (ref) => Stream<List<ProductInventory>>.value(
+              const <ProductInventory>[],
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: theme,
+          home: BarcodeScannerPage(
+            matchedProductPageBuilder: (_) => const SizedBox.shrink(),
+            createProductPageBuilder: (_) => const SizedBox.shrink(),
+            scannerBuilder: (_, _) => const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('scanner-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('scanner-frame')), findsOneWidget);
+    expect(find.byKey(const Key('scanner-instructions')), findsOneWidget);
+    expect(
+      find.text('Point the camera at a product barcode or QR code.'),
+      findsOneWidget,
+    );
+
+    final appBar = tester.widget<AppBar>(find.byType(AppBar));
+    expect(appBar.backgroundColor, theme.colorScheme.surface);
+    expect(appBar.foregroundColor, theme.colorScheme.onSurface);
+
+    final frame = tester.widget<DecoratedBox>(
+      find.byKey(const Key('scanner-frame')),
+    );
+    final frameDecoration = frame.decoration as BoxDecoration;
+    expect(frameDecoration.border?.top.color, theme.colorScheme.primary);
+
+    final instructionPanel = find.byKey(const Key('scanner-instructions'));
+    final instructions = tester.widget<DecoratedBox>(
+      find.descendant(
+        of: instructionPanel,
+        matching: find.byType(DecoratedBox),
+      ),
+    );
+    final instructionDecoration = instructions.decoration as BoxDecoration;
+    expect(
+      instructionDecoration.color,
+      theme.colorScheme.surface.withValues(alpha: 0.94),
+    );
   });
 
   testWidgets('navigates to the matching product from the local catalog', (

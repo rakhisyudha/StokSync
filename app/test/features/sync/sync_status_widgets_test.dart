@@ -273,6 +273,13 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.drag(
+        find.byKey(const Key('sync-status-detail-content')),
+        const Offset(0, -500),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('sync-status-overview')), findsOneWidget);
+      expect(find.byKey(const Key('sync-status-explanation')), findsOneWidget);
     });
 
     testWidgets('status chip navigates to the local detail screen', (
@@ -309,6 +316,33 @@ void main() {
       );
     });
 
+    testWidgets('keeps the full destination usable when local status fails', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncSummaryProvider.overrideWith(
+              (_) => Stream<SyncSummary>.error(StateError('read failed')),
+            ),
+          ],
+          child: const MaterialApp(home: SyncStatusDetailPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('sync-status-detail-unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Local sync status is unavailable. Your local inventory remains on this device.',
+        ),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('detail screen offers manual sync when runtime is available', (
       tester,
     ) async {
@@ -341,6 +375,11 @@ void main() {
           ],
           child: const MaterialApp(home: SyncStatusDetailPage()),
         ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const Key('sync-status-detail-content')),
+        const Offset(0, -600),
       );
       await tester.pumpAndSettle();
 

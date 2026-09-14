@@ -211,7 +211,8 @@ class _LocalSyncStatusContent extends StatelessWidget {
   }
 }
 
-/// Shows the complete local sync summary and an optional manual sync action.
+/// Shows the complete local sync summary as the authenticated Sync
+/// destination, with an optional manual sync action.
 class SyncStatusDetailPage extends ConsumerWidget {
   const SyncStatusDetailPage({super.key});
 
@@ -220,11 +221,11 @@ class SyncStatusDetailPage extends ConsumerWidget {
     final summary = ref.watch(syncSummaryProvider);
     final coordinator = ref.watch(syncTriggerCoordinatorProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Sync status')),
+      key: const Key('sync-destination-page'),
+      appBar: AppBar(title: const Text('Sync')),
       body: summary.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) =>
-            const Center(child: Text('Local sync status is unavailable.')),
+        loading: () => const _SyncStatusDetailLoading(),
+        error: (_, _) => _SyncStatusDetailUnavailable(coordinator: coordinator),
         data: (value) =>
             _SyncStatusDetailContent(summary: value, coordinator: coordinator),
       ),
@@ -243,44 +244,110 @@ class _SyncStatusDetailContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final lastSyncedAt = summary.lastSyncedAt;
     final error = summary.lastError?.trim();
+    final hasError = error != null && error.isNotEmpty;
+    final attentionRequired =
+        summary.status.trim().toLowerCase() == 'blocked' || hasError;
+    final statusContainer = attentionRequired
+        ? colorScheme.errorContainer
+        : colorScheme.primaryContainer;
+    final statusOnContainer = attentionRequired
+        ? colorScheme.onErrorContainer
+        : colorScheme.onPrimaryContainer;
+
     return ListView(
       key: const Key('sync-status-detail-content'),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
+        Text('Sync status', style: theme.textTheme.headlineSmall),
+        const SizedBox(height: 6),
+        Text(
+          'Keep working locally while StokSync checks reachability and sends pending changes.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 20),
         Card(
+          key: const Key('sync-status-overview'),
+          color: statusContainer,
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.sync_outlined, size: 28),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    syncStatusStateLabel(summary.status),
-                    key: const Key('sync-status-state'),
-                    style: Theme.of(context).textTheme.headlineSmall,
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: statusOnContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Icon(
+                      attentionRequired
+                          ? Icons.sync_problem_outlined
+                          : Icons.sync_outlined,
+                      color: statusContainer,
+                      size: 28,
+                    ),
                   ),
                 ),
-                Chip(
-                  key: const Key('sync-status-detail-chip'),
-                  label: Text(localSyncStatusLabel(summary)),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Current state',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: statusOnContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        syncStatusStateLabel(summary.status),
+                        key: const Key('sync-status-state'),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: statusOnContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Chip(
+                        key: const Key('sync-status-detail-chip'),
+                        label: Text(localSyncStatusLabel(summary)),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        _SyncStatusDetailMetric(
-          key: const Key('sync-status-pending-count'),
-          label: 'Pending operations',
-          value: '${summary.pendingOperationCount}',
-        ),
-        _SyncStatusDetailMetric(
-          key: const Key('sync-status-conflict-count'),
-          label: 'Unresolved conflicts',
-          value: '${summary.unresolvedConflictCount}',
+        const SizedBox(height: 24),
+        Text('Sync overview', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _SyncStatusDetailMetric(
+                key: const Key('sync-status-pending-count'),
+                label: 'Pending operations',
+                value: '${summary.pendingOperationCount}',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _SyncStatusDetailMetric(
+                key: const Key('sync-status-conflict-count'),
+                label: 'Unresolved conflicts',
+                value: '${summary.unresolvedConflictCount}',
+              ),
+            ),
+          ],
         ),
         _SyncStatusDetailMetric(
           key: const Key('sync-status-last-successful-sync'),
@@ -290,20 +357,56 @@ class _SyncStatusDetailContent extends StatelessWidget {
         _SyncStatusDetailMetric(
           key: const Key('sync-status-error-summary'),
           label: 'Latest error',
-          value: error == null || error.isEmpty ? 'None recorded' : error,
+          value: hasError ? error : 'None recorded',
+          valueColor: hasError ? colorScheme.error : null,
         ),
         const SizedBox(height: 8),
-        Text(
-          localSyncLastKnownStatus(summary),
-          key: const Key('sync-status-detail-copy'),
+        Card(
+          key: const Key('sync-status-explanation'),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, color: colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'What this means',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        localSyncLastKnownStatus(summary),
+                        key: const Key('sync-status-detail-copy'),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Status counts are local. A sync attempt confirms reachability before sending work.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         if (coordinator != null) ...[
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            key: const Key('manual-sync-detail-button'),
-            onPressed: () => unawaited(coordinator!.manualRefresh()),
-            icon: const Icon(Icons.sync),
-            label: const Text('Sync now'),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('manual-sync-detail-button'),
+              onPressed: () => unawaited(coordinator!.manualRefresh()),
+              icon: const Icon(Icons.sync),
+              label: const Text('Sync now'),
+            ),
           ),
         ],
       ],
@@ -316,15 +419,120 @@ class _SyncStatusDetailMetric extends StatelessWidget {
     super.key,
     required this.label,
     required this.value,
+    this.valueColor,
   });
 
   final String label;
   final String value;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Card(
-      child: ListTile(title: Text(label), subtitle: Text(value)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: theme.textTheme.titleLarge?.copyWith(color: valueColor),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SyncStatusDetailLoading extends StatelessWidget {
+  const _SyncStatusDetailLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return ListView(
+      key: const Key('sync-status-detail-loading'),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      children: [
+        Text('Sync status', style: theme.textTheme.headlineSmall),
+        const SizedBox(height: 20),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                CircularProgressIndicator(color: colorScheme.primary),
+                const SizedBox(width: 16),
+                const Expanded(child: Text('Reading local sync status…')),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SyncStatusDetailUnavailable extends StatelessWidget {
+  const _SyncStatusDetailUnavailable({required this.coordinator});
+
+  final SyncTriggerCoordinator? coordinator;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return ListView(
+      key: const Key('sync-status-detail-unavailable'),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      children: [
+        Text('Sync status', style: theme.textTheme.headlineSmall),
+        const SizedBox(height: 20),
+        Card(
+          color: colorScheme.errorContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.error_outline, color: colorScheme.onErrorContainer),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Local sync status is unavailable. Your local inventory remains on this device.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (coordinator != null) ...[
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('manual-sync-detail-button'),
+              onPressed: () => unawaited(coordinator!.manualRefresh()),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

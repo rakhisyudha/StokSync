@@ -40,6 +40,13 @@ final movementHistoryProvider = StreamProvider.autoDispose
           .watchMovementHistory(productId);
     });
 
+/// Reactively exposes retained movement history across every locally known
+/// product, including movements belonging to deleted products.
+final allMovementHistoryProvider =
+    StreamProvider.autoDispose<List<MovementWithProduct>>((ref) {
+      return ref.watch(localInventoryQueriesProvider).watchAllMovementHistory();
+    });
+
 /// Reactively exposes active products whose balance is at or below min stock.
 final lowStockProductsProvider =
     StreamProvider.autoDispose<List<ProductInventory>>((ref) {
@@ -100,6 +107,29 @@ final class LocalInventoryQueries {
         (movement) => OrderingTerm.desc(movement.id),
       ]);
     return query.watch();
+  }
+
+  Stream<List<MovementWithProduct>> watchAllMovementHistory() {
+    final query =
+        _database.select(_database.stockMovements).join([
+          innerJoin(
+            _database.products,
+            _database.products.id.equalsExp(_database.stockMovements.productId),
+          ),
+        ])..orderBy([
+          OrderingTerm.desc(_database.stockMovements.occurredAt),
+          OrderingTerm.desc(_database.stockMovements.id),
+        ]);
+    return query.watch().map(
+      (rows) => rows
+          .map(
+            (row) => MovementWithProduct(
+              movement: row.readTable(_database.stockMovements),
+              product: row.readTable(_database.products),
+            ),
+          )
+          .toList(growable: false),
+    );
   }
 
   Stream<List<ProductInventory>> watchLowStockProducts() {
@@ -200,6 +230,16 @@ final class ProductInventory {
 
   final Product product;
   final int quantity;
+}
+
+/// A retained ledger row paired with its product identity for cross-product
+/// history. The product row is intentionally retained even when it is deleted
+/// so historical movements remain understandable and auditable.
+final class MovementWithProduct {
+  const MovementWithProduct({required this.movement, required this.product});
+
+  final StockMovement movement;
+  final Product product;
 }
 
 /// Local sync metadata needed for a truthful, network-independent status UI.

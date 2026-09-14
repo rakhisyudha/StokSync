@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' hide isNull;
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -119,6 +119,72 @@ void main() {
         ),
       );
     });
+
+    test(
+      'stream all movement history with product identity and tie ordering',
+      () async {
+        final harness = _QueryProviderHarness();
+        addTearDown(harness.close);
+        await harness.insertProduct(id: 'coffee', name: 'Coffee');
+        await harness.insertProduct(
+          id: 'tea',
+          name: 'Tea',
+          deletedAt: DateTime.utc(2026, 9, 13),
+        );
+        final container = harness.createContainer();
+        addTearDown(container.dispose);
+        final values = <List<MovementWithProduct>>[];
+
+        container.listen<AsyncValue<List<MovementWithProduct>>>(
+          allMovementHistoryProvider,
+          (_, next) {
+            if (next.hasValue) {
+              values.add(next.value!);
+            }
+          },
+          fireImmediately: true,
+        );
+
+        await _waitUntil(() => values.isNotEmpty);
+        expect(values.single, isEmpty);
+
+        final occurredAt = DateTime.utc(2026, 9, 13, 10);
+        await harness.insertMovement(
+          id: 'older',
+          productId: 'coffee',
+          occurredAt: occurredAt.subtract(const Duration(hours: 1)),
+          note: 'Opening stock',
+        );
+        await harness.insertMovement(
+          id: 'z-newer-tie',
+          productId: 'tea',
+          occurredAt: occurredAt,
+          countedQty: 8,
+          kind: 'stocktake',
+        );
+        await harness.insertMovement(
+          id: 'a-older-tie',
+          productId: 'coffee',
+          occurredAt: occurredAt,
+        );
+
+        await _waitUntil(
+          () => values.any(
+            (rows) =>
+                rows.length == 3 &&
+                rows[0].movement.id == 'z-newer-tie' &&
+                rows[0].product.name == 'Tea' &&
+                rows[1].movement.id == 'a-older-tie' &&
+                rows[2].product.name == 'Coffee',
+          ),
+          description: 'cross-product movement history ordering',
+        );
+        final latest = values.lastWhere((rows) => rows.length == 3);
+        expect(latest[0].product.deletedAt, isNotNull);
+        expect(latest[0].movement.countedQty, 8);
+        expect(latest[2].movement.note, 'Opening stock');
+      },
+    );
 
     test('stream low-stock products and local sync summary changes', () async {
       final harness = _QueryProviderHarness();
@@ -297,6 +363,10 @@ final class _QueryProviderHarness {
     required String id,
     required String productId,
     required DateTime occurredAt,
+    int delta = 1,
+    String kind = 'receive',
+    String? note,
+    int? countedQty,
   }) {
     return database
         .into(database.stockMovements)
@@ -304,10 +374,12 @@ final class _QueryProviderHarness {
           StockMovementsCompanion.insert(
             id: id,
             productId: productId,
-            delta: 1,
-            kind: 'receive',
+            delta: delta,
+            kind: kind,
+            note: Value(note),
             occurredAt: occurredAt,
             rawOccurredAt: occurredAt,
+            countedQty: Value(countedQty),
             deviceId: 'device-1',
           ),
         );

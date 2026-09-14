@@ -40,6 +40,18 @@ void main() {
 
         await tester.tap(find.byKey(const Key('receive-stock-button')));
         await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('movement-current-balance')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('movement-entry-form-card')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('movement-entry-guidance')),
+          findsOneWidget,
+        );
         await tester.enterText(
           find.byKey(const Key('movement-quantity-field')),
           '5',
@@ -47,6 +59,9 @@ void main() {
         await tester.enterText(
           find.byKey(const Key('movement-note-field')),
           'Inbound delivery',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-movement-button')),
         );
         await tester.tap(find.byKey(const Key('save-movement-button')));
         await tester.pumpAndSettle();
@@ -61,6 +76,9 @@ void main() {
         await tester.enterText(
           find.byKey(const Key('movement-quantity-field')),
           '0',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-movement-button')),
         );
         await tester.tap(find.byKey(const Key('save-movement-button')));
         await tester.pumpAndSettle();
@@ -87,6 +105,9 @@ void main() {
         await tester.enterText(
           find.byKey(const Key('movement-note-field')),
           'Damaged beans',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-movement-button')),
         );
         await tester.tap(find.byKey(const Key('save-movement-button')));
         await tester.pumpAndSettle();
@@ -140,10 +161,25 @@ void main() {
         await tester.ensureVisible(reverseButton);
         await tester.tap(reverseButton);
         await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('movement-reversal-summary-card')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('movement-reversal-form-card')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('movement-reversal-guidance')),
+          findsOneWidget,
+        );
         expect(find.text('Original delta: +10'), findsOneWidget);
         await tester.enterText(
           find.byKey(const Key('movement-reversal-note-field')),
           'Undo opening delivery',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-reversal-button')),
         );
         await tester.tap(find.byKey(const Key('save-reversal-button')));
         await tester.pumpAndSettle();
@@ -176,6 +212,9 @@ void main() {
           find.byKey(const Key('movement-note-field')),
           'Physical count',
         );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-movement-button')),
+        );
         await tester.tap(find.byKey(const Key('save-movement-button')));
         await tester.pumpAndSettle();
 
@@ -198,6 +237,9 @@ void main() {
         await tester.enterText(
           find.byKey(const Key('movement-counted-quantity-field')),
           '4',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('save-movement-button')),
         );
         await tester.tap(find.byKey(const Key('save-movement-button')));
         await tester.pumpAndSettle();
