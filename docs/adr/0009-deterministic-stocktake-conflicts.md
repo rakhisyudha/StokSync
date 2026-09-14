@@ -46,3 +46,11 @@ appended deltas.
 - The canonical balance remains the sum of retained immutable movement deltas.
 - A client must understand the new optional metadata, while older v1 clients
   that reject unknown fields require the normal schema/version rollout path.
+
+## Related decisions and documentation
+
+- [ADR 0003: Immutable signed stock ledger](0003-immutable-stock-ledger.md)
+- [ADR 0012: Preserve conflict intent and resolve it explicitly](0012-conflict-policies-and-explicit-resolution.md)
+- [Conflict matrix](../conflict-matrix.md)
+- [Synchronization protocol](../sync-protocol.md)
+- [Design: Conflict model](../../.kiro/specs/stoksync/design.md#9-conflict-model)

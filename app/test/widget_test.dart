@@ -49,4 +49,25 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('uses the system theme mode with light and dark app themes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const StokSyncApp(authenticatedHome: SizedBox.shrink()),
+    );
+
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+
+    expect(app.themeMode, ThemeMode.system);
+    expect(app.theme?.useMaterial3, isTrue);
+    expect(app.darkTheme?.useMaterial3, isTrue);
+    expect(app.theme?.colorScheme.brightness, Brightness.light);
+    expect(app.darkTheme?.colorScheme.brightness, Brightness.dark);
+    expect(app.theme?.textTheme.bodyMedium?.fontFamily, startsWith('Inter'));
+    expect(
+      app.darkTheme?.textTheme.bodyMedium?.fontFamily,
+      startsWith('Inter'),
+    );
+  });
 }

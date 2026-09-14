@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 func TestHealthEndpointReturnsOK(t *testing.T) {
@@ -103,5 +107,24 @@ func TestRouterMountsSyncRoute(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("sync route status = %d, want 204", recorder.Code)
+	}
+}
+
+func TestRouterDoesNotReflectOrLogUntrustedRequestID(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	router := NewRouter(logging.NewWithWriter("production", &logs), nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	request.Header.Set("X-Request-ID", "Bearer request-secret-token")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("X-Request-ID"); got != "[external]" {
+		t.Fatalf("X-Request-ID = %q, want [external]", got)
+	}
+	if strings.Contains(logs.String(), "request-secret-token") {
+		t.Fatalf("request ID secret was logged: %s", logs.String())
 	}
 }

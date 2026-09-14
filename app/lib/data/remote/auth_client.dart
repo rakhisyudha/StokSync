@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:sync_engine/sync_engine.dart';
 
+import '../../core/diagnostics/diagnostics.dart';
+
 /// A safe, user-facing classification for login and session persistence
 /// failures. It intentionally never includes request bodies or credentials.
 final class AuthClientException implements Exception {
@@ -33,13 +35,16 @@ final class HttpAuthClient {
     required Uri baseUri,
     SyncHttpRequestSender? sender,
     SyncNow? now,
+    AppDiagnostics? diagnostics,
   }) : _endpoint = _resolveLoginEndpoint(baseUri),
        _sender = sender ?? IoSyncHttpRequestSender(),
-       _now = now ?? _utcNow;
+       _now = now ?? _utcNow,
+       _diagnostics = diagnostics;
 
   final Uri _endpoint;
   final SyncHttpRequestSender _sender;
   final SyncNow _now;
+  final AppDiagnostics? _diagnostics;
 
   Uri get endpoint => _endpoint;
 
@@ -55,6 +60,13 @@ final class HttpAuthClient {
     if (normalizedEmail.isEmpty ||
         password.isEmpty ||
         normalizedDeviceId.isEmpty) {
+      _diagnostics?.event(
+        'auth.login',
+        fields: const <String, Object?>{
+          'outcome': 'rejected',
+          'reason': 'invalid_request',
+        },
+      );
       throw const AuthClientException(reason: 'invalid_request');
     }
 
@@ -78,12 +90,33 @@ final class HttpAuthClient {
         ),
       );
     } on SyncTransportException {
+      _diagnostics?.event(
+        'auth.login',
+        fields: const <String, Object?>{
+          'outcome': 'failed',
+          'reason': 'network_unavailable',
+        },
+      );
       throw const AuthClientException(reason: 'network_unavailable');
     } on Object {
+      _diagnostics?.event(
+        'auth.login',
+        fields: const <String, Object?>{
+          'outcome': 'failed',
+          'reason': 'network_unavailable',
+        },
+      );
       throw const AuthClientException(reason: 'network_unavailable');
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      _diagnostics?.event(
+        'auth.login',
+        fields: <String, Object?>{
+          'outcome': 'rejected',
+          'status_code': response.statusCode,
+        },
+      );
       throw AuthClientException(
         reason: _errorCode(response.body) ?? _statusReason(response.statusCode),
         statusCode: response.statusCode,
@@ -91,13 +124,37 @@ final class HttpAuthClient {
     }
 
     try {
-      return SyncSession.fromAuthResponseJsonString(
+      final session = SyncSession.fromAuthResponseJsonString(
         _decodeBody(response.body),
         now: _now,
       );
+      _diagnostics?.event(
+        'auth.login',
+        fields: <String, Object?>{
+          'outcome': 'succeeded',
+          'status_code': response.statusCode,
+        },
+      );
+      return session;
     } on FormatException {
+      _diagnostics?.event(
+        'auth.login',
+        fields: <String, Object?>{
+          'outcome': 'failed',
+          'reason': 'session_response_invalid',
+          'status_code': response.statusCode,
+        },
+      );
       throw const AuthClientException(reason: 'session_response_invalid');
     } on SyncProtocolException {
+      _diagnostics?.event(
+        'auth.login',
+        fields: <String, Object?>{
+          'outcome': 'failed',
+          'reason': 'session_response_invalid',
+          'status_code': response.statusCode,
+        },
+      );
       throw const AuthClientException(reason: 'session_response_invalid');
     }
   }

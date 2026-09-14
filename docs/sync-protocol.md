@@ -1,5 +1,12 @@
 # StokSync synchronization protocol
 
+The protocol decisions are recorded in [ADR 0010: operation idempotency and
+original-outcome replay](adr/0010-sync-operation-idempotency.md), [ADR 0011:
+transaction-scoped change cursors](adr/0011-transaction-scoped-change-cursors.md),
+[ADR 0012: conflict policies and explicit resolution](adr/0012-conflict-policies-and-explicit-resolution.md),
+[ADR 0009: deterministic stocktake conflicts](adr/0009-deterministic-stocktake-conflicts.md),
+and [ADR 0005: foreground-first v1 execution](adr/0005-no-redis-or-asynq-in-v1.md).
+
 ## API conventions and current routes
 
 The API is currently served under `/v1` by the Go/Chi server. Examples in this

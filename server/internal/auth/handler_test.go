@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 type fakeAuthService struct {
@@ -148,5 +149,39 @@ func TestHandlerReturnsInternalErrorWithoutDatabaseDetails(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError || bytes.Contains(recorder.Body.Bytes(), []byte("secret")) {
 		t.Fatalf("internal error response = (%d, %s), want generic 500", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandlerLogsSafeLoginOutcomeWithoutCredentials(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	deviceID := uuid.New()
+	service := &fakeAuthService{session: Session{
+		UserID:               uuid.New(),
+		DeviceID:             deviceID,
+		AccessToken:          "access-token-secret",
+		AccessTokenExpiresAt: time.Now().Add(time.Minute),
+		RefreshToken:         "refresh-token-secret",
+	}}
+	handler := NewHandler(service, nil, logging.NewWithWriter("production", &logs)).Routes()
+	request := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(
+		`{"email":"owner@example.com","password":"password-secret","device_id":"`+deviceID.String()+`","device_name":"Phone","platform":"android"}`,
+	))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200", recorder.Code)
+	}
+	line := logs.String()
+	for _, secret := range []string{"owner@example.com", "password-secret", "access-token-secret", "refresh-token-secret"} {
+		if bytes.Contains([]byte(line), []byte(secret)) {
+			t.Fatalf("auth log contains secret %q: %s", secret, line)
+		}
+	}
+	if !bytes.Contains([]byte(line), []byte(`"auth.login"`)) ||
+		!bytes.Contains([]byte(line), []byte(`"succeeded"`)) {
+		t.Fatalf("auth log lacks safe outcome fields: %s", line)
 	}
 }

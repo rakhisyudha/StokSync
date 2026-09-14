@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_engine/sync_engine.dart';
 
 import 'core/config/app_config.dart';
+import 'core/diagnostics/diagnostics.dart';
 import 'core/identity/device_identity.dart';
+import 'core/theme/app_theme.dart';
 import 'data/local/local_database.dart';
 import 'data/local/local_query_providers.dart';
 import 'data/remote/auth_client.dart';
@@ -16,6 +18,7 @@ import 'features/sync/sync_trigger_providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final diagnostics = const AppDiagnostics();
   final database = await openLocalDatabase();
   final baseUri = StokSyncAppConfig.apiBaseUri;
   final sessionStore = SecureSyncSessionStore();
@@ -29,7 +32,11 @@ Future<void> main() async {
     sender: httpSender,
   );
   final authController = AuthSessionController(
-    client: HttpAuthClient(baseUri: baseUri, sender: httpSender),
+    client: HttpAuthClient(
+      baseUri: baseUri,
+      sender: httpSender,
+      diagnostics: diagnostics,
+    ),
     sessionStore: sessionStore,
   );
   final runtimeBinding = SyncRuntimeBinding.fromEngine(
@@ -42,6 +49,7 @@ Future<void> main() async {
       overrides: [
         stoksyncDatabaseProvider.overrideWithValue(database),
         syncRuntimeProvider.overrideWithValue(runtimeBinding),
+        appDiagnosticsProvider.overrideWithValue(diagnostics),
       ],
       child: StokSyncApp(
         authenticatedHome: AuthenticatedSessionGate(
@@ -69,9 +77,9 @@ class StokSyncApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'StokSync',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
+      theme: buildStokSyncTheme(Brightness.light),
+      darkTheme: buildStokSyncTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
       home:
           authenticatedHome ??
           const SyncTriggerHost(child: ProductBrowsePage()),

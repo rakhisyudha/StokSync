@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stoksync/core/diagnostics/diagnostics.dart';
 import 'package:stoksync/features/sync/sync_reachability.dart';
 import 'package:stoksync/features/sync/sync_trigger_coordinator.dart';
 import 'package:sync_engine/sync_engine.dart';
@@ -85,12 +86,14 @@ void main() {
         final timers = _ManualTimerFactory();
         final probe = _FakeReachability();
         final runner = _FakeRunner();
+        final diagnosticLines = <String>[];
         final hints = StreamController<Object?>.broadcast();
         final coordinator = _coordinator(
           probe: probe,
           runner: runner,
           timers: timers,
           connectivityHints: hints.stream,
+          diagnostics: AppDiagnostics(writer: diagnosticLines.add),
         );
         addTearDown(() async {
           coordinator.dispose();
@@ -101,6 +104,8 @@ void main() {
         final manual = await coordinator.manualRefresh();
         expect(manual.status, SyncTriggerStatus.completed);
         expect(manual.reasons, [SyncTriggerReason.manualRefresh]);
+        expect(diagnosticLines.single, contains('"event":"sync.trigger"'));
+        expect(diagnosticLines.single, contains('"outcome":"completed"'));
         expect(probe.calls, 1);
         expect(runner.calls, 1);
 
@@ -184,6 +189,7 @@ SyncTriggerCoordinator _coordinator({
   required _ManualTimerFactory timers,
   Stream<void>? localWriteEvents,
   Stream<Object?>? connectivityHints,
+  AppDiagnostics? diagnostics,
 }) {
   return SyncTriggerCoordinator(
     synchronize: runner.run,
@@ -191,6 +197,7 @@ SyncTriggerCoordinator _coordinator({
     localWriteEvents: localWriteEvents,
     connectivityHints: connectivityHints,
     timerFactory: timers.create,
+    diagnostics: diagnostics,
   );
 }
 

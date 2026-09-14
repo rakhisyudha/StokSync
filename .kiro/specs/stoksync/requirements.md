@@ -171,6 +171,28 @@ StokSync is an offline-first Android/iOS inventory application for one account o
 
 **NFR-6 — Maintainability:** The project shall document key decisions, the sync protocol, and the conflict policy. Client and server schema changes shall be versioned with migrations.
 
+### 3.7 Visual system and navigation
+
+**FR-20 — Theming**
+
+- The app shall derive its light and dark color schemes from one Material 3 seed color using `ColorScheme.fromSeed`; individual colors shall not be hand-picked outside the seed.
+- The app shall follow the device's system light/dark setting rather than requiring a manual in-app theme toggle in v1.
+
+**FR-21 — Typography**
+
+- The app shall apply one consistent typeface across all screens by composing a Google Fonts family into the Material 3 `TextTheme`, rather than styling individual screens independently.
+
+**FR-22 — Primary navigation**
+
+- The authenticated app shall present Products, Movements, Sync, and Conflicts as top-level destinations in a persistent bottom navigation bar.
+- Product detail/edit, movement entry/reversal, barcode scanning, and conflict detail shall remain screens reached from their owning destination, not separate top-level destinations.
+- A cross-product movement history view shall be reachable from the Movements destination, showing recent movements across all products without altering ledger semantics or balance derivation.
+
+**FR-23 — Conflict payload readability**
+
+- The conflict detail screen shall present base, local, and canonical server payload fields as labeled values rather than raw JSON, using human-readable labels for known product/movement fields.
+- Every field currently shown in a payload section shall remain visible after this change; no field shall be hidden or summarized away. A field with no known label shall still render using its raw key.
+
 ## 5. Acceptance scenarios
 
 1. **Offline ledger convergence:** Device A records `issue -3` and device B records `issue -2` for the same product while both are offline. After each device synchronizes, both show both movements and the same balance reduced by five.
@@ -181,3 +203,4 @@ StokSync is an offline-first Android/iOS inventory application for one account o
 6. **Barcode collision:** Separate offline product creations use the same barcode. One succeeds; the other operation becomes a visible barcode conflict, not a duplicate active barcode.
 7. **Token expiry offline:** The user can continue viewing and recording locally while authentication refresh is unavailable. Synchronization becomes blocked and pending operations remain intact until reauthentication.
 8. **Stocktake:** Two devices submit stocktakes for the same product from stale balances. The server recomputes canonical deltas and applies the documented deterministic policy without corrupting the ledger.
+9. **Theme and navigation:** Switching the device between light and dark mode updates every screen's colors without an app restart. From any of the four bottom navigation destinations, the user can reach every screen listed in FR-22 without returning through the product catalog.

@@ -1,12 +1,14 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stoksync/core/diagnostics/diagnostics.dart';
 import 'package:stoksync/data/remote/auth_client.dart';
 import 'package:sync_engine/sync_engine.dart';
 
 void main() {
   group('HttpAuthClient', () {
     test('posts login credentials and decodes the returned session', () async {
+      final diagnosticLines = <String>[];
       final sender = _RecordingSender(
         SyncHttpResponse(
           statusCode: 200,
@@ -27,6 +29,7 @@ void main() {
           'https://example.test/api/v1/sync?secret=must-not-be-retained',
         ),
         sender: sender,
+        diagnostics: AppDiagnostics(writer: diagnosticLines.add),
         now: () => DateTime.utc(2026, 9, 13, 10, 2, 14),
       );
 
@@ -57,6 +60,11 @@ void main() {
         session.accessTokenExpiresAt,
         DateTime.utc(2026, 9, 13, 10, 17, 14),
       );
+      expect(diagnosticLines.single, contains('"event":"auth.login"'));
+      expect(diagnosticLines.single, contains('"outcome":"succeeded"'));
+      expect(diagnosticLines.single, isNot(contains('correct horse')));
+      expect(diagnosticLines.single, isNot(contains('access-token')));
+      expect(diagnosticLines.single, isNot(contains('refresh-token')));
     });
 
     test(

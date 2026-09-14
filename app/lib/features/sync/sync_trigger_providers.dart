@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_engine/sync_engine.dart';
 
+import '../../core/diagnostics/diagnostics.dart';
 import '../../data/local/local_write_notifier.dart';
 import 'connectivity_hint_source.dart';
 import 'sync_lifecycle_adapter.dart';
@@ -33,6 +34,12 @@ final class SyncRuntimeBinding {
   final SyncReachabilityProbe reachability;
 }
 
+/// Client-side structured diagnostics. The default writer is debug-only and
+/// tests can override it with an in-memory writer.
+final appDiagnosticsProvider = Provider<AppDiagnostics>((ref) {
+  return const AppDiagnostics();
+});
+
 /// Overridden by the authenticated composition root when sync is available.
 final syncRuntimeProvider = Provider<SyncRuntimeBinding?>((ref) => null);
 
@@ -51,11 +58,13 @@ final syncTriggerCoordinatorProvider = Provider<SyncTriggerCoordinator?>((ref) {
 
   final localWriteNotifier = ref.watch(localWriteNotifierProvider);
   final connectivity = ref.watch(connectivityHintSourceProvider);
+  final diagnostics = ref.watch(appDiagnosticsProvider);
   final coordinator = SyncTriggerCoordinator(
     synchronize: runtime.synchronize,
     reachability: runtime.reachability,
     localWriteEvents: localWriteNotifier.events,
     connectivityHints: connectivity.hints,
+    diagnostics: diagnostics,
   );
   ref.onDispose(coordinator.dispose);
   return coordinator;

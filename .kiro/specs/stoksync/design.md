@@ -15,6 +15,9 @@
 | Server migrations | `goose` or `golang-migrate` | Versioned, repeatable schema evolution. |
 | Sync transport | REST JSON over HTTPS | Debuggable and sufficient for v1; a single sync exchange combines push and pull. |
 | Queue/workers | Deferred | v1 sync runs synchronously inside the API. Add Postgres-backed worker jobs before Redis/Asynq when a real asynchronous job exists. |
+| Theming | Material 3 `ColorScheme.fromSeed`, light and dark, `ThemeMode.system` | A generated, contrast-checked palette without hand-rolled colors; dark mode is nearly free once the seed scheme is used correctly. |
+| Typography | `google_fonts` (Inter) merged into the Material 3 `TextTheme` | A distinct, legible look with minimal implementation effort over the Material 3 default type scale. |
+| Navigation | Material 3 `NavigationBar` with Products / Movements / Sync / Conflicts destinations | The app-bar-only structure does not scale past one screen; a bottom nav matches familiar inventory/POS app patterns. |
 
 ## 2. Scope boundaries
 
@@ -336,3 +339,39 @@ A three-way merge compares `base → local` changed fields with `base → server
 | Offline auth destroys local work | Treat expired credentials as sync-blocked, never as permission to wipe local state. |
 | Clock differences affect stocktake order | Persist/refresh server clock offset; make server canonically recompute stocktake deltas. |
 | Background execution differs by OS | Make foreground sync correct; treat background sync as optional v2 enhancement. |
+
+## 13. Visual system and navigation (Milestone 7)
+
+v1's functional screens were built with default Material widgets and no shared visual system. Milestone 7 refines presentation without changing any domain, sync, or conflict behavior decided in sections 1-12.
+
+### 13.1 Theming
+
+- The app defines exactly one seed color and generates both light and dark `ColorScheme`s from it with `ColorScheme.fromSeed(seedColor: ..., brightness: Brightness.light/dark)`. No individual color is hand-picked outside the seed; Material 3 computes primary/secondary/tertiary/error roles and their contrast pairs.
+- `MaterialApp.themeMode` is `ThemeMode.system`. The app follows the device's light/dark setting; there is no in-app override in v1.
+- Both `ThemeData` instances use `useMaterial3: true` (the current Flutter default) and set `colorScheme`, leaving component-level styling to Material 3 defaults unless a specific screen requires a documented exception.
+
+### 13.2 Typography
+
+- The app applies the `google_fonts` package's `Inter` font family to the Material 3 `TextTheme` (e.g., `GoogleFonts.interTextTheme(Theme.of(context).textTheme)` composed into each `ThemeData`), rather than overriding individual text styles per screen.
+- Existing `textTheme.headlineSmall` / `titleMedium` / `bodyMedium` usages across screens are preserved; only the font family and the theme's derived weights change.
+
+### 13.3 Navigation structure
+
+- A `NavigationBar` (Material 3 bottom navigation) replaces the current single-page-plus-app-bar structure as the authenticated app's root shell. Destinations, in this order: **Products**, **Movements**, **Sync**, **Conflicts**.
+- **Products** hosts today's `ProductBrowsePage` (browse/search/create/edit/soft-delete) and the barcode scanner entry point.
+- **Movements** is a new cross-product movement history view (list of recent movements across all products, newest first), separate from the existing per-product movement history on the product detail page. It reuses the existing `LocalInventoryQueries` pattern with a new unfiltered movement stream rather than changing ledger semantics.
+- **Sync** hosts the existing sync-status detail screen (state, pending count, conflicts, last successful sync, error summary, manual sync action) as a full destination instead of only a toolbar chip.
+- **Conflicts** hosts the existing conflict list/detail flow as a full destination instead of an app-bar icon button.
+- The product detail, product edit, movement entry, movement reversal, barcode scanner, and conflict detail screens remain pushed routes reached from their respective tab, not new bottom-nav destinations themselves.
+- Auth (sign-in) remains the pre-authentication gate shown before the navigation shell, unchanged in structure; only its visual styling is in scope for Milestone 7.
+
+### 13.4 Conflict payload presentation
+
+- The conflict detail screen's base/local/server payload sections stop rendering raw pretty-printed JSON. Each section instead renders a structured label/value list built from the same decoded JSON object already available to the widget (`conflict.basePayload` / `localPayload` / `serverPayload`), mapping known product/movement fields (for example `name`, `barcode`, `sku`, `unit`, `min_stock`, `version`, `delta`, `counted_qty`) to human-readable labels.
+- A field present in one payload but absent or differing in another remains visible in its own section; the presentation change does not alter which data is shown, only how it is formatted. No field is summarized away or hidden.
+- Fields not in the known label map (forward-compatible/unexpected fields) still render using their raw JSON key as a fallback label, so the view degrades gracefully rather than silently dropping data.
+
+### 13.5 Verification
+
+- Milestone 7 is verified visually on a running Android emulator (the developer's Pixel 8a emulator target) rather than solely through widget tests, because the goal is a perceivable layout/theme/navigation change. Widget tests continue to assert structure (destinations present, keys present, label content) but do not substitute for an on-emulator visual check.
+- Each task under Milestone 7 is expected to produce an immediately visible, incremental change on the running emulator (hot reload/restart) before moving to the next task, per the task list in `tasks.md`.

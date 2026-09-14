@@ -227,6 +227,11 @@ class StokSyncDatabase extends _$StokSyncDatabase {
   );
 
   Future<void> _createIndexes() async {
+    // Replacing this named index is safe on create and protects upgrades from
+    // legacy definitions when a database jumps across multiple versions.
+    await customStatement(
+      'DROP INDEX IF EXISTS products_active_barcode_unique',
+    );
     await customStatement(
       'CREATE UNIQUE INDEX IF NOT EXISTS products_active_barcode_unique '
       'ON products (barcode) '

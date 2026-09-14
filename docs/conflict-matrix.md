@@ -1,6 +1,6 @@
 # StokSync conflict matrix
 
-This matrix is the v1 source of truth for conflict behavior. It complements the protocol contract in [sync-protocol.md](sync-protocol.md) and the architecture design in [`.kiro/specs/stoksync/design.md`](../.kiro/specs/stoksync/design.md). Each policy preserves local intent or immutable history; no rejected intent is silently discarded.
+This matrix is the v1 source of truth for conflict behavior. It complements the protocol contract in [sync-protocol.md](sync-protocol.md) and the architecture design in [`.kiro/specs/stoksync/design.md`](../.kiro/specs/stoksync/design.md). The governing decisions are recorded in [ADR 0012: conflict policies and explicit resolution](adr/0012-conflict-policies-and-explicit-resolution.md) and [ADR 0009: deterministic concurrent stocktake policy](adr/0009-deterministic-stocktake-conflicts.md). Each policy preserves local intent or immutable history; no rejected intent is silently discarded.
 
 | Scenario | Canonical policy | Client behavior | Automated evidence |
 |---|---|---|---|

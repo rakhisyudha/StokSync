@@ -55,3 +55,26 @@ Get-Content server/migrations/validate_constraints.sql |
 
 A successful run prints `000002 constraint validation passed` and leaves the
 database unchanged.
+
+## Migration upgrade tests
+
+`test-upgrades.ps1` creates disposable PostgreSQL databases, applies the
+pinned `golang-migrate` runner only through migration 000001 or 000002, loads a
+representative previous-schema fixture, upgrades to the latest migration, and
+runs assertions over preserved catalog, tombstone, stocktake, balance,
+change-log, refresh-token, and rejected-sync-operation data. It also probes the
+constraints and indexes introduced by the remaining migrations. The temporary
+databases are dropped in a `finally` block and the existing development
+PostgreSQL service is left running.
+
+Run it from the repository root after Docker Compose has loaded the local
+`.env` values (the script starts PostgreSQL if needed):
+
+```powershell
+.\server\migrations\test-upgrades.ps1
+```
+
+The two scenarios cover v1 -> latest (including 000002 and 000003) and v2 ->
+latest (the 000003 upgrade path). Ordinary `go test ./...` remains offline;
+this opt-in test uses the same pinned migration container as the documented
+local migration command.

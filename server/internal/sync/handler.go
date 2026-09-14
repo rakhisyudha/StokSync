@@ -5,14 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	"github.com/stoksync/stoksync/server/internal/auth"
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 const (
@@ -40,12 +44,24 @@ type Handler struct {
 	requireAuth auth.Middleware
 	limits      Limits
 	now         func() time.Time
+	logger      *slog.Logger
 }
 
 // NewHandler constructs a sync handler using the protocol's default limits.
 // An invalid custom limit is ignored in the same manner as the existing
 // snapshot handler; callers can only configure a validated bounded exchange.
 func NewHandler(service ServiceAPI, requireAuth auth.Middleware, configured ...Limits) *Handler {
+	return newHandler(service, requireAuth, nil, configured...)
+}
+
+// NewHandlerWithLogger is the process composition-root constructor. The
+// logger receives only bounded exchange summaries, never operation payloads or
+// authorization metadata.
+func NewHandlerWithLogger(service ServiceAPI, requireAuth auth.Middleware, logger *slog.Logger, configured ...Limits) *Handler {
+	return newHandler(service, requireAuth, logger, configured...)
+}
+
+func newHandler(service ServiceAPI, requireAuth auth.Middleware, logger *slog.Logger, configured ...Limits) *Handler {
 	limits := DefaultLimits()
 	if len(configured) > 0 {
 		candidate := configured[0].WithDefaults()
@@ -58,6 +74,7 @@ func NewHandler(service ServiceAPI, requireAuth auth.Middleware, configured ...L
 		requireAuth: requireAuth,
 		limits:      limits,
 		now:         time.Now,
+		logger:      logger,
 	}
 }
 
@@ -77,25 +94,34 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 	identity, ok := auth.IdentityFromContext(r.Context())
 	if !ok {
+		h.logExchange(r, "rejected", "invalid_identity")
 		w.Header().Set("WWW-Authenticate", `Bearer realm="stoksync"`)
 		writeSyncError(w, http.StatusUnauthorized, ErrInvalidIdentity)
 		return
 	}
 	if h == nil || h.service == nil {
+		h.logExchange(r, "failed", "internal_error")
 		writeSyncError(w, http.StatusInternalServerError, ErrInvalidService)
 		return
 	}
 
 	request, err := DecodeRequest(requestBody(r), h.limits)
 	if err != nil {
+		reason := "invalid_request"
+		if errors.Is(err, ErrRequestTooLarge) {
+			reason = "request_too_large"
+		}
+		h.logExchange(r, "rejected", reason)
 		writeSyncRequestError(w, err)
 		return
 	}
 	if request.DeviceID != identity.DeviceID {
+		h.logExchange(r, "rejected", ErrorDeviceMismatch)
 		writeSyncError(w, http.StatusForbidden, ErrRequestDeviceMismatch)
 		return
 	}
 	if err := h.service.ValidateDevice(r.Context(), identity.UserID, request.DeviceID); err != nil {
+		h.logExchange(r, "rejected", syncValidationReason(err))
 		writeDeviceValidationError(w, err)
 		return
 	}
@@ -124,6 +150,7 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 
 	feed, err := h.service.ListChanges(r.Context(), identity.UserID, request.Cursor, request.MaxChanges)
 	if err != nil {
+		h.logExchange(r, "failed", "change_feed_error", "error_type", fmt.Sprintf("%T", err))
 		writeSyncError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -135,12 +162,60 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 	response := NewSyncResponse(results, feed.Changes, feed.NextCursor, feed.HasMore, clock().UTC())
 	var body bytes.Buffer
 	if err := EncodeResponse(&body, response, h.limits); err != nil {
+		h.logExchange(r, "failed", "response_encoding_error", "error_type", fmt.Sprintf("%T", err))
 		writeSyncError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body.Bytes())
+
+	applied, rejected := 0, 0
+	for _, result := range results {
+		if result.Status == ResultStatusApplied {
+			applied++
+		} else {
+			rejected++
+		}
+	}
+	h.logExchange(
+		r,
+		"succeeded",
+		"",
+		"operation_count", len(results),
+		"applied_count", applied,
+		"rejected_count", rejected,
+		"change_count", len(feed.Changes),
+		"cursor", request.Cursor,
+		"next_cursor", feed.NextCursor,
+		"has_more", feed.HasMore,
+	)
+}
+
+func (h *Handler) logExchange(r *http.Request, outcome, reason string, extra ...any) {
+	if h == nil || h.logger == nil {
+		return
+	}
+	attrs := []any{
+		"outcome", outcome,
+		"request_id", logging.SafeRequestID(middleware.GetReqID(r.Context())),
+	}
+	if reason != "" {
+		attrs = append(attrs, "reason", reason)
+	}
+	attrs = append(attrs, extra...)
+	h.logger.Info("sync.exchange", attrs...)
+}
+
+func syncValidationReason(err error) string {
+	switch {
+	case errors.Is(err, ErrDeviceNotRegistered):
+		return ErrorDeviceNotRegistered
+	case errors.Is(err, ErrInvalidIdentity), errors.Is(err, ErrRequestDeviceMismatch):
+		return ErrorDeviceMismatch
+	default:
+		return "internal_error"
+	}
 }
 
 func requestBody(r *http.Request) io.Reader {

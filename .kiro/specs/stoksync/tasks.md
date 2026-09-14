@@ -98,14 +98,28 @@ This document is the incremental implementation plan for StokSync, covering the 
 
 ## Milestone 6 — Quality, demo readiness, and documentation
 
-- [ ] 6.1 Add Drift migration tests and server migration-upgrade tests from representative previous schemas.
-- [ ] 6.2 Expand the convergence harness with dropped requests/responses, duplicates, reordering, timeouts, retries, and random operation sequences; assert eventual convergence and ledger-derived balances.
-- [ ] 6.3 Add client/server structured logging and safe diagnostics, excluding credentials and tokens.
-- [ ] 6.4 Complete README documentation: local setup, architecture diagram, data model, protocol overview, test commands, known v1 limits, and two-device demonstration steps.
-- [ ] 6.5 Record ADRs for idempotency, cursor allocation, conflict behavior, stocktake policy, and foreground-first sync constraints.
-- [ ] 6.6 Manually validate the demo on two physical phones or emulators: scan, offline operations, restart persistence, convergence, and conflict resolution.
+- [x] 6.1 Add Drift migration tests and server migration-upgrade tests from representative previous schemas.
+- [x] 6.2 Expand the convergence harness with dropped requests/responses, duplicates, reordering, timeouts, retries, and random operation sequences; assert eventual convergence and ledger-derived balances.
+- [x] 6.3 Add client/server structured logging and safe diagnostics, excluding credentials and tokens.
+- [x] 6.4 Complete README documentation: local setup, architecture diagram, data model, protocol overview, test commands, known v1 limits, and two-device demonstration steps.
+- [x] 6.5 Record ADRs for idempotency, cursor allocation, conflict behavior, stocktake policy, and foreground-first sync constraints.
+- [x] 6.6 Manually validate the demo on two physical phones or emulators: scan, offline operations, restart persistence, convergence, and conflict resolution.
 
 **Milestone validation:** A reviewer can clone the repository, run the documented environment, use two clients offline/online, observe status/conflicts, and run automated convergence tests without author assistance.
+
+## Milestone 7 — UI/UX enhancement
+
+- [ ] 7.1 Add the `google_fonts` dependency, define one Material 3 seed color, and build light/dark `ThemeData` from `ColorScheme.fromSeed` with the `Inter` text theme composed in. Wire `ThemeMode.system` in `MaterialApp`. Run the app on the Android emulator (Pixel 8a) and confirm the theme change is visible immediately (hot reload) before continuing.
+- [ ] 7.2 Restyle the auth (sign-in) screen using the new theme: spacing, button styles, and error/loading states, with no change to its authentication logic. Verify on the running emulator.
+- [ ] 7.3 Introduce the `NavigationBar` root shell with Products / Movements / Sync / Conflicts destinations, replacing the current single-page-plus-app-bar structure. Move `ProductBrowsePage` under the Products destination. Verify all four destinations render and switch correctly on the running emulator.
+- [ ] 7.4 Restyle product browse, detail, and edit/create screens: list/card layout, empty and low-stock states, form styling, and FAB placement consistent with the new theme.
+- [ ] 7.5 Move the sync-status detail screen to the Sync destination as a full screen (not only a toolbar chip) and restyle its state/pending/conflict/error summary layout.
+- [ ] 7.6 Move the conflict list to the Conflicts destination as a full screen. Restyle the conflict detail screen's base/local/server payload sections as structured label/value lists per design.md section 13.4, preserving every field currently shown.
+- [ ] 7.7 Build the new cross-product Movements destination (recent movements across all products, newest first) and restyle the existing per-product movement entry/reversal forms.
+- [ ] 7.8 Restyle the barcode scanner screen's overlay/controls to match the new theme.
+- [ ] 7.9 Sweep every screen touched by 7.2-7.8 for consistent spacing, color-role usage (no hand-picked colors outside the seed scheme), and dark-mode correctness on the running emulator.
+
+**Milestone validation:** On the Pixel 8a emulator, toggle the device between light and dark mode and confirm every screen updates without restarting the app. Navigate to Products, Movements, Sync, and Conflicts from the bottom navigation bar and confirm each destination and its pushed screens render with the new theme and typography. Open a conflict's detail screen and confirm base/local/server values appear as labeled fields with no field missing compared to the prior raw-JSON view.
 
 ## Deferred v2 backlog
 
@@ -128,11 +142,11 @@ This document is the incremental implementation plan for StokSync, covering the 
 ```json
 {
   "waves": [
-    { "id": 0, "tasks": ["5.6", "6.1", "V2.1"] },
-    { "id": 1, "tasks": ["5.7", "5.8", "6.2", "V2.2"] },
-    { "id": 2, "tasks": ["5.9", "6.3", "6.4", "V2.3"] },
-    { "id": 3, "tasks": ["6.5", "V2.4"] },
-    { "id": 4, "tasks": ["6.6", "V2.5"] },
+    { "id": 0, "tasks": ["7.1", "V2.1"] },
+    { "id": 1, "tasks": ["7.2", "V2.2"] },
+    { "id": 2, "tasks": ["7.3", "V2.3"] },
+    { "id": 3, "tasks": ["7.4", "7.5", "7.6", "7.7", "7.8", "V2.4"] },
+    { "id": 4, "tasks": ["7.9", "V2.5"] },
     { "id": 5, "tasks": ["V2.6"] }
   ]
 }

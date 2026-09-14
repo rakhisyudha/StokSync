@@ -4,6 +4,7 @@ package httpx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 // ReadinessCheck reports whether dependencies required to serve traffic are available.
@@ -70,7 +72,7 @@ func newRouter(logger *slog.Logger, readiness ReadinessCheck, authRoute, snapsho
 	})
 	router.Get("/v1/ready", func(w http.ResponseWriter, r *http.Request) {
 		if err := readiness(r.Context()); err != nil {
-			logger.Error("readiness check failed", "error", err)
+			logger.Error("readiness check failed", "error_type", logging.SafeErrorType(err))
 			writeJSON(w, http.StatusServiceUnavailable, statusResponse{Status: "not_ready"})
 			return
 		}
@@ -94,11 +96,9 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			started := time.Now()
-			requestID := middleware.GetReqID(r.Context())
+			requestID := logging.SafeRequestID(middleware.GetReqID(r.Context()))
 			wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			if requestID != "" {
-				wrapped.Header().Set("X-Request-ID", requestID)
-			}
+			wrapped.Header().Set("X-Request-ID", requestID)
 
 			next.ServeHTTP(wrapped, r)
 
@@ -124,8 +124,8 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					logger.Error("panic while handling request",
-						"request_id", middleware.GetReqID(r.Context()),
-						"panic", recovered,
+						"request_id", logging.SafeRequestID(middleware.GetReqID(r.Context())),
+						"panic_type", fmt.Sprintf("%T", recovered),
 						"stack", string(debug.Stack()),
 					)
 					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

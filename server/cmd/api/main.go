@@ -57,7 +57,7 @@ func main() {
 		logger.Error("invalid authentication configuration", "error", err)
 		os.Exit(1)
 	}
-	authHandler := auth.NewHandler(authService, authService.RequireAuth)
+	authHandler := auth.NewHandler(authService, authService.RequireAuth, logger)
 	snapshotService, err := snapshot.NewService(pool)
 	if err != nil {
 		logger.Error("invalid snapshot configuration", "error", err)
@@ -69,7 +69,7 @@ func main() {
 		logger.Error("invalid synchronization configuration", "error", err)
 		os.Exit(1)
 	}
-	syncHandler := syncapi.NewHandler(syncService, authService.RequireAuth)
+	syncHandler := syncapi.NewHandlerWithLogger(syncService, authService.RequireAuth, logger)
 	handler := httpx.NewRouterWithSnapshotAndSync(logger, pool.Ping, authHandler.Routes(), snapshotHandler.Routes(), syncHandler.Routes())
 
 	httpServer := &http.Server{

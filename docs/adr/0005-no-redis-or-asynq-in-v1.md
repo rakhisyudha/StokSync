@@ -26,3 +26,11 @@ Do not include Redis, Asynq, or separate background worker processes in v1.
 - Request handlers must keep synchronization batches bounded and efficient because they run synchronously.
 - Features that require asynchronous processing must either remain out of scope or justify a deliberate architecture change.
 - A future worker system must preserve transactional handoff and idempotency guarantees instead of relying on best-effort delivery.
+
+## Related decisions and documentation
+
+- [ADR 0008: Serialized client sync scheduling and recoverable queue states](0008-client-sync-scheduling-and-recovery.md)
+- [ADR 0010: Replay durable synchronization operation outcomes](0010-sync-operation-idempotency.md)
+- [ADR 0012: Preserve conflict intent and resolve it explicitly](0012-conflict-policies-and-explicit-resolution.md)
+- [Design: v1 scope boundaries](../../.kiro/specs/stoksync/design.md#2-scope-boundaries)
+- [Synchronization protocol](../sync-protocol.md)

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/stoksync/stoksync/server/internal/auth"
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 type fakeSyncService struct {
@@ -182,7 +183,8 @@ func TestHandlerReturnsEmptyPushPullResponseAndValidatesRegisteredDevice(t *test
 		t.Fatalf("IssueAccessToken() error = %v", err)
 	}
 	service := &fakeSyncService{processErrors: map[uuid.UUID]error{}, processResults: map[uuid.UUID]OperationResult{}}
-	h := NewHandler(service, auth.RequireAccessToken(manager))
+	var logs bytes.Buffer
+	h := NewHandlerWithLogger(service, auth.RequireAccessToken(manager), logging.NewWithWriter("production", &logs))
 	h.now = func() time.Time { return serverTime }
 	handler := h.Routes()
 	requestBody := marshalSyncRequest(t, SyncRequest{
@@ -219,6 +221,10 @@ func TestHandlerReturnsEmptyPushPullResponseAndValidatesRegisteredDevice(t *test
 	}
 	if len(service.processCalls) != 0 {
 		t.Errorf("empty batch process calls = %d, want 0", len(service.processCalls))
+	}
+	if !bytes.Contains(logs.Bytes(), []byte(`"sync.exchange"`)) ||
+		!bytes.Contains(logs.Bytes(), []byte(`"operation_count":0`)) {
+		t.Fatalf("sync log lacks safe bounded summary: %s", logs.String())
 	}
 }
 

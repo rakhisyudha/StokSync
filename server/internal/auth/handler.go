@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/stoksync/stoksync/server/internal/platform/logging"
 )
 
 const maxAuthRequestBytes = 16 << 10
@@ -32,12 +35,18 @@ type Middleware func(http.Handler) http.Handler
 type Handler struct {
 	service     ServiceAPI
 	requireAuth Middleware
+	logger      *slog.Logger
 }
 
 // NewHandler constructs authentication routes from a service and its access
-// token middleware.
-func NewHandler(service ServiceAPI, requireAuth Middleware) *Handler {
-	return &Handler{service: service, requireAuth: requireAuth}
+// token middleware. The optional logger receives only safe authentication
+// outcome events; credentials and token values are never passed to it.
+func NewHandler(service ServiceAPI, requireAuth Middleware, logger ...*slog.Logger) *Handler {
+	var eventLogger *slog.Logger
+	if len(logger) > 0 {
+		eventLogger = logger[0]
+	}
+	return &Handler{service: service, requireAuth: requireAuth, logger: eventLogger}
 }
 
 // Routes returns a Chi router mounted by the process-level API router.
@@ -80,57 +89,108 @@ type errorResponse struct {
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	input, ok := decodeCredentials(w, r)
 	if !ok {
+		h.logOutcome(r, "auth.register", "rejected", "invalid_request")
 		return
 	}
 	session, err := h.service.Register(r.Context(), input)
 	if err != nil {
+		h.logOutcome(r, "auth.register", "rejected", authErrorReason(err))
 		writeServiceError(w, err)
 		return
 	}
+	h.logOutcome(r, "auth.register", "succeeded", "")
 	writeSession(w, http.StatusCreated, session)
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	input, ok := decodeCredentials(w, r)
 	if !ok {
+		h.logOutcome(r, "auth.login", "rejected", "invalid_request")
 		return
 	}
 	session, err := h.service.Login(r.Context(), input)
 	if err != nil {
+		h.logOutcome(r, "auth.login", "rejected", authErrorReason(err))
 		writeServiceError(w, err)
 		return
 	}
+	h.logOutcome(r, "auth.login", "succeeded", "")
 	writeSession(w, http.StatusOK, session)
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	var request refreshRequest
 	if !decodeJSON(w, r, &request) {
+		h.logOutcome(r, "auth.refresh", "rejected", "invalid_request")
 		return
 	}
 	if strings.TrimSpace(request.RefreshToken) == "" {
+		h.logOutcome(r, "auth.refresh", "rejected", "invalid_request")
 		writeAuthError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	session, err := h.service.Refresh(r.Context(), request.RefreshToken)
 	if err != nil {
+		h.logOutcome(r, "auth.refresh", "rejected", authErrorReason(err))
 		writeServiceError(w, err)
 		return
 	}
+	h.logOutcome(r, "auth.refresh", "succeeded", "")
 	writeSession(w, http.StatusOK, session)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	identity, ok := IdentityFromContext(r.Context())
 	if !ok {
+		h.logOutcome(r, "auth.logout", "rejected", "unauthorized")
 		writeAuthError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if err := h.service.RevokeDeviceSessions(r.Context(), identity.UserID, identity.DeviceID); err != nil {
+		h.logOutcome(r, "auth.logout", "rejected", "internal_error")
 		writeServiceError(w, err)
 		return
 	}
+	h.logOutcome(r, "auth.logout", "succeeded", "")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) logOutcome(r *http.Request, event, outcome, reason string) {
+	if h == nil || h.logger == nil {
+		return
+	}
+	attrs := []any{
+		"outcome", outcome,
+		"request_id", requestID(r),
+	}
+	if reason != "" {
+		attrs = append(attrs, "reason", reason)
+	}
+	h.logger.Info(event, attrs...)
+}
+
+func requestID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return logging.SafeRequestID(middleware.GetReqID(r.Context()))
+}
+
+func authErrorReason(err error) string {
+	switch {
+	case errors.Is(err, ErrInvalidInput):
+		return "invalid_input"
+	case errors.Is(err, ErrInvalidCredentials):
+		return "invalid_credentials"
+	case errors.Is(err, ErrEmailTaken):
+		return "email_taken"
+	case errors.Is(err, ErrDeviceOwnership):
+		return "device_conflict"
+	case errors.Is(err, ErrInvalidRefreshToken), errors.Is(err, ErrRefreshTokenExpired), errors.Is(err, ErrRefreshTokenReuse):
+		return "invalid_refresh_token"
+	default:
+		return "internal_error"
+	}
 }
 
 func decodeCredentials(w http.ResponseWriter, r *http.Request) (LoginInput, bool) {

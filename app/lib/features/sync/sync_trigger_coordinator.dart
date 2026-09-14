@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:sync_engine/sync_engine.dart';
 
+import '../../core/diagnostics/diagnostics.dart';
 import 'sync_reachability.dart';
 
 /// Runs one complete push-then-pull cycle through the existing sync engine.
@@ -84,11 +85,13 @@ final class SyncTriggerCoordinator {
     this.localWriteDebounce = const Duration(seconds: 2),
     this.foregroundInterval = const Duration(minutes: 1),
     SyncTimerFactory? timerFactory,
+    AppDiagnostics? diagnostics,
   }) : _synchronize = synchronize,
        _reachability = reachability,
        _localWriteEvents = localWriteEvents,
        _connectivityHints = connectivityHints,
-       _timerFactory = timerFactory ?? _defaultSyncTimerFactory {
+       _timerFactory = timerFactory ?? _defaultSyncTimerFactory,
+       _diagnostics = diagnostics {
     if (localWriteDebounce < Duration.zero) {
       throw ArgumentError.value(
         localWriteDebounce,
@@ -114,6 +117,7 @@ final class SyncTriggerCoordinator {
     Duration localWriteDebounce = const Duration(seconds: 2),
     Duration foregroundInterval = const Duration(minutes: 1),
     SyncTimerFactory? timerFactory,
+    AppDiagnostics? diagnostics,
   }) {
     return SyncTriggerCoordinator(
       synchronize: engine.synchronize,
@@ -123,6 +127,7 @@ final class SyncTriggerCoordinator {
       localWriteDebounce: localWriteDebounce,
       foregroundInterval: foregroundInterval,
       timerFactory: timerFactory,
+      diagnostics: diagnostics,
     );
   }
 
@@ -131,6 +136,7 @@ final class SyncTriggerCoordinator {
   final Stream<void>? _localWriteEvents;
   final Stream<Object?>? _connectivityHints;
   final SyncTimerFactory _timerFactory;
+  final AppDiagnostics? _diagnostics;
 
   StreamSubscription<void>? _localWriteSubscription;
   StreamSubscription<Object?>? _connectivitySubscription;
@@ -333,16 +339,26 @@ final class SyncTriggerCoordinator {
 
   Future<SyncTriggerResult> _attempt(List<_PendingTrigger> batch) async {
     final reasons = _reasons(batch);
+    late final SyncTriggerResult result;
     try {
       final reachable = await _reachability.check();
       if (!reachable) {
-        return _result(SyncTriggerStatus.unreachable, reasons);
+        result = _result(SyncTriggerStatus.unreachable, reasons);
+      } else {
+        await _synchronize();
+        result = _result(SyncTriggerStatus.completed, reasons);
       }
-      await _synchronize();
-      return _result(SyncTriggerStatus.completed, reasons);
     } on Object {
-      return _result(SyncTriggerStatus.failed, reasons);
+      result = _result(SyncTriggerStatus.failed, reasons);
     }
+    _diagnostics?.event(
+      'sync.trigger',
+      fields: <String, Object?>{
+        'outcome': result.status.name,
+        'reasons': reasons.map((reason) => reason.name).toList(),
+      },
+    );
+    return result;
   }
 
   List<SyncTriggerReason> _reasons(List<_PendingTrigger> batch) {

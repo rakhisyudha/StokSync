@@ -777,6 +777,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677110
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876258
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358885978
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789359541427
       }
     ],
     "6.2 Expand the convergence harness with dropped requests/responses, duplicates, reordering, timeouts, retries, and random operation sequences; assert eventual convergence and ledger-derived balances.": [
@@ -789,6 +804,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677170
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876530
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789359546333
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789359938204
       }
     ],
     "6.3 Add client/server structured logging and safe diagnostics, excluding credentials and tokens.": [
@@ -801,6 +831,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677233
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876634
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789359943039
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789360723784
       }
     ],
     "6.4 Complete README documentation: local setup, architecture diagram, data model, protocol overview, test commands, known v1 limits, and two-device demonstration steps.": [
@@ -813,6 +858,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677290
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876710
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789359947644
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789360727795
       }
     ],
     "6.5 Record ADRs for idempotency, cursor allocation, conflict behavior, stocktake policy, and foreground-first sync constraints.": [
@@ -825,6 +885,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677349
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876866
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789360731975
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789360970318
       }
     ],
     "6.6 Manually validate the demo on two physical phones or emulators: scan, offline operations, restart persistence, convergence, and conflict resolution.": [
@@ -837,6 +912,21 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677412
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876928
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789360974983
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789362638397
       }
     ],
     "V2.1 Introduce multi-tenant ownership (`tenant_id`), tenant-scoped unique indexes, authorization, and PostgreSQL row-level security.": [
@@ -849,6 +939,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677476
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358876995
       }
     ],
     "V2.2 Add shared organizations, roles, invitations, and multi-user audit attribution.": [
@@ -861,6 +956,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677533
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358877079
       }
     ],
     "V2.3 Add a Postgres-backed worker queue for genuine asynchronous jobs using transactionally enqueued jobs and `FOR UPDATE SKIP LOCKED`.": [
@@ -873,6 +973,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677591
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358877271
       }
     ],
     "V2.4 Evaluate Redis and Asynq only after a demonstrated need for distributed rate limiting, caching, delayed jobs, or higher worker throughput.": [
@@ -885,6 +990,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677724
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358877340
       }
     ],
     "V2.5 Add FCM/APNs data-message nudges and opportunistic mobile background sync; retain foreground sync as the correctness baseline.": [
@@ -897,6 +1007,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677782
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358877424
       }
     ],
     "V2.6 Add partial replication/sync rules only when catalog size or privacy requirements demand it.": [
@@ -909,6 +1024,11 @@
         "executionId": "f5f8fa77-f075-434c-9ff0-632b60e3a200",
         "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
         "timestamp": 1789348677835
+      },
+      {
+        "executionId": "b4d68cf3-47fd-46a4-993c-e8ecc82465da",
+        "chatSessionId": "sess_065792a1-52dd-407e-9e46-f7079a61f943",
+        "timestamp": 1789358877572
       }
     ]
   }
