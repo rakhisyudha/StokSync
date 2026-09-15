@@ -120,11 +120,8 @@ void main() {
 
       await tester.pumpAndSettle();
       final signInLink = find.byKey(const Key('register-sign-in-link'));
-      await tester.scrollUntilVisible(
-        signInLink,
-        100,
-        scrollable: find.byType(Scrollable).first,
-      );
+      await tester.drag(find.byType(ListView).first, const Offset(0, -400));
+      await tester.pumpAndSettle();
       await tester.tap(signInLink);
       expect(signInTapped, isTrue);
     },

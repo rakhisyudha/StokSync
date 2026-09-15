@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
 import '../products/product_pages.dart';
@@ -19,7 +20,20 @@ class MovementDestinationPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final movements = ref.watch(allMovementHistoryProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Movements')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Movements'),
+            Text(
+              'Recent ledger activity',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: movements.when(
         loading: () => const _MovementLoadingState(),
         error: (_, _) => const _MovementErrorState(),
@@ -103,7 +117,12 @@ class _MovementCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       'Delta: ${_signedMovementDelta(movement.delta)} ${product.unit}',
-                      style: theme.textTheme.bodyMedium,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: movement.delta >= 0
+                            ? semanticColorsOf(context).success
+                            : colors.error,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     if (movement.countedQty != null) ...[
                       const SizedBox(height: 2),

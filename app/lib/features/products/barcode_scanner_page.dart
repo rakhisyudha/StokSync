@@ -152,7 +152,18 @@ class _BarcodeScannerPageState extends ConsumerState<BarcodeScannerPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scan barcode or QR code'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Scan barcode or QR code'),
+            Text(
+              'Match or create a local product',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
         backgroundColor: colorScheme.surface,
         foregroundColor: colorScheme.onSurface,
         surfaceTintColor: colorScheme.surfaceTint,

@@ -15,9 +15,9 @@
 | Server migrations | `goose` or `golang-migrate` | Versioned, repeatable schema evolution. |
 | Sync transport | REST JSON over HTTPS | Debuggable and sufficient for v1; a single sync exchange combines push and pull. |
 | Queue/workers | Deferred | v1 sync runs synchronously inside the API. Add Postgres-backed worker jobs before Redis/Asynq when a real asynchronous job exists. |
-| Theming | Material 3 `ColorScheme.fromSeed`, light and dark, `ThemeMode.system` | A generated, contrast-checked palette without hand-rolled colors; dark mode is nearly free once the seed scheme is used correctly. |
-| Typography | `google_fonts` (Inter) merged into the Material 3 `TextTheme` | A distinct, legible look with minimal implementation effort over the Material 3 default type scale. |
-| Navigation | Material 3 `NavigationBar` with Products / Movements / Sync / Conflicts destinations | The app-bar-only structure does not scale past one screen; a bottom nav matches familiar inventory/POS app patterns. |
+| Theming | Deliberate light/dark Material 3 token schemes with a persisted System / Light / Dark preference | The prior seed-only palette was visually too flat and produced insufficient dark-mode clarity. Named semantic tokens provide controlled contrast and a coherent clean-SaaS presentation. |
+| Typography | `google_fonts` (Inter) composed into the Material 3 `TextTheme`, with documented role weights and spacing | A single legible family and a stable hierarchy make dense inventory data easier to scan without per-screen typography drift. |
+| Navigation | Material 3 `NavigationBar` with Products / Movements / Sync / Conflicts plus a non-tab Settings entry point | Four primary destinations remain clear while Settings provides appearance control without overcrowding navigation. |
 
 ## 2. Scope boundaries
 
@@ -340,38 +340,98 @@ A three-way merge compares `base → local` changed fields with `base → server
 | Clock differences affect stocktake order | Persist/refresh server clock offset; make server canonically recompute stocktake deltas. |
 | Background execution differs by OS | Make foreground sync correct; treat background sync as optional v2 enhancement. |
 
-## 13. Visual system and navigation (Milestone 7)
+## 13. Presentation system and navigation (Milestone 8)
 
-v1's functional screens were built with default Material widgets and no shared visual system. Milestone 7 refines presentation without changing any domain, sync, or conflict behavior decided in sections 1-12.
+Milestone 7 remains the historical first-pass Material 3 implementation. Milestone 8 supersedes its seed-only, system-only visual decisions because the resulting dark palette and hierarchy did not meet the product-quality bar. It is a presentation-only redesign: it must not change the local-first architecture, data model, ledger rules, authentication protocol, synchronization protocol, or conflict-resolution semantics in sections 1-12.
 
-### 13.1 Theming
+### 13.1 Visual direction
 
-- The app defines exactly one seed color and generates both light and dark `ColorScheme`s from it with `ColorScheme.fromSeed(seedColor: ..., brightness: Brightness.light/dark)`. No individual color is hand-picked outside the seed; Material 3 computes primary/secondary/tertiary/error roles and their contrast pairs.
-- `MaterialApp.themeMode` is `ThemeMode.system`. The app follows the device's light/dark setting; there is no in-app override in v1.
-- Both `ThemeData` instances use `useMaterial3: true` (the current Flutter default) and set `colorScheme`, leaving component-level styling to Material 3 defaults unless a specific screen requires a documented exception.
+StokSync adopts a **clean SaaS / finance-dashboard** direction: calm, structured, and trustworthy rather than decorative. The application should feel like a professional operational workspace on a phone:
 
-### 13.2 Typography
+- Deep navy/blue anchors primary actions and selected state; cool slate neutrals carry the layout; semantic green, amber, and red communicate inventory and synchronization conditions.
+- Surfaces are layered deliberately: a page canvas, a normal surface, and an elevated/contained surface. Cards are reserved for grouped decisions, summaries, and actionable status—not used as a wrapper around every list row.
+- Data hierarchy is explicit: a clear page title, a concise supporting summary when useful, high-emphasis quantity/status values, readable row titles, and subdued but still legible metadata.
+- Rounded corners, light shadows, and motion are restrained. The visual language prioritizes scan speed and dark-mode clarity over decorative gradients, glass effects, or large empty hero areas.
 
-- The app applies the `google_fonts` package's `Inter` font family to the Material 3 `TextTheme` (e.g., `GoogleFonts.interTextTheme(Theme.of(context).textTheme)` composed into each `ThemeData`), rather than overriding individual text styles per screen.
-- Existing `textTheme.headlineSmall` / `titleMedium` / `bodyMedium` usages across screens are preserved; only the font family and the theme's derived weights change.
+### 13.2 Semantic color tokens and contrast
 
-### 13.3 Navigation structure
+`app_theme.dart` becomes the only owner of palette values. It must build explicit light and dark `ColorScheme` instances from the approved token palette; `ColorScheme.fromSeed` is no longer the source of truth. Feature code consumes `Theme.of(context).colorScheme`, themed component defaults, or named extension tokens only.
 
-- A `NavigationBar` (Material 3 bottom navigation) replaces the current single-page-plus-app-bar structure as the authenticated app's root shell. Destinations, in this order: **Products**, **Movements**, **Sync**, **Conflicts**.
-- **Products** hosts today's `ProductBrowsePage` (browse/search/create/edit/soft-delete) and the barcode scanner entry point.
-- **Movements** is a new cross-product movement history view (list of recent movements across all products, newest first), separate from the existing per-product movement history on the product detail page. It reuses the existing `LocalInventoryQueries` pattern with a new unfiltered movement stream rather than changing ledger semantics.
-- **Sync** hosts the existing sync-status detail screen (state, pending count, conflicts, last successful sync, error summary, manual sync action) as a full destination instead of only a toolbar chip.
-- **Conflicts** hosts the existing conflict list/detail flow as a full destination instead of an app-bar icon button.
-- The product detail, product edit, movement entry, movement reversal, barcode scanner, and conflict detail screens remain pushed routes reached from their respective tab, not new bottom-nav destinations themselves.
-- Auth (sign-in) remains the pre-authentication gate shown before the navigation shell, unchanged in structure; only its visual styling is in scope for Milestone 7.
+| Role | Light token | Dark token | Intended use |
+|---|---:|---:|---|
+| Brand / primary | `#2563EB` | `#8DB5FF` | Primary CTA, selected navigation, focused controls, links |
+| On primary | `#FFFFFF` | `#08245B` | Content on primary actions |
+| Brand container | `#DBEAFE` | `#183C81` | Selected/low-emphasis brand surfaces |
+| App canvas | `#F7F9FC` | `#0A1020` | Scaffold and page background |
+| Surface | `#FFFFFF` | `#111A2C` | App bars, sheets, dialogs, normal grouped content |
+| Surface container | `#EEF2F7` | `#17243A` | Inputs, selected containers, low-emphasis panels |
+| Elevated surface | `#FFFFFF` | `#1C2A43` | Action cards and elevated panels |
+| Primary text / icon | `#152238` | `#F8FAFC` | Editable text, headings, primary icons |
+| Secondary text / icon | `#526073` | `#C1CBD9` | Labels, metadata, hints, secondary icons |
+| Outline | `#CBD5E1` | `#405069` | Dividers, enabled field borders, inactive controls |
+| Success | `#18794E` | `#62D29A` | Healthy sync, positive inventory states |
+| Warning | `#A8550A` | `#FFC56D` | Low stock, retry/backoff, caution states |
+| Error | `#C9362B` | `#FFB4AB` | Errors, blocked sync, destructive actions |
 
-### 13.4 Conflict payload presentation
+The theme implementation must map these values to the appropriate Material 3 roles (`primary`, `onPrimary`, `primaryContainer`, `surface`, `surfaceContainer*`, `onSurface`, `onSurfaceVariant`, `outline`, `error`, and their contrast pairs), and supply extension tokens only for semantic success and warning states that Material's base scheme does not represent.
 
-- The conflict detail screen's base/local/server payload sections stop rendering raw pretty-printed JSON. Each section instead renders a structured label/value list built from the same decoded JSON object already available to the widget (`conflict.basePayload` / `localPayload` / `serverPayload`), mapping known product/movement fields (for example `name`, `barcode`, `sku`, `unit`, `min_stock`, `version`, `delta`, `counted_qty`) to human-readable labels.
-- A field present in one payload but absent or differing in another remains visible in its own section; the presentation change does not alter which data is shown, only how it is formatted. No field is summarized away or hidden.
-- Fields not in the known label map (forward-compatible/unexpected fields) still render using their raw JSON key as a fallback label, so the view degrades gracefully rather than silently dropping data.
+The accepted implementation must verify normal text at a minimum 4.5:1 contrast ratio and component boundaries/icons at a minimum 3:1 contrast ratio in both modes. In particular, every editable `TextFormField` must set its value text to `onSurface`, its label/hint/icon to the intended `onSurfaceVariant` role, and its fill/border states from the paired surface/outline roles; it must never rely on a platform default text color.
 
-### 13.5 Verification
+### 13.3 Typography, layout, and interaction tokens
 
-- Milestone 7 is verified visually on a running Android emulator (the developer's Pixel 8a emulator target) rather than solely through widget tests, because the goal is a perceivable layout/theme/navigation change. Widget tests continue to assert structure (destinations present, keys present, label content) but do not substitute for an on-emulator visual check.
-- Each task under Milestone 7 is expected to produce an immediately visible, incremental change on the running emulator (hot reload/restart) before moving to the next task, per the task list in `tasks.md`.
+- Inter remains the sole application family. It is composed into both Material 3 text themes once, then consumed by semantic styles: `headlineSmall` for page titles, `titleLarge/titleMedium` for key values and sections, `bodyLarge/bodyMedium` for content, and `labelLarge/labelMedium` for controls and metadata.
+- Use a 4-point spacing rhythm: 4, 8, 12, 16, 24, 32, and 40 logical pixels. Standard screen gutters are 20 pixels on phone widths and grow only where the layout has room.
+- Use 12-pixel radii for compact controls/list containers and 16-pixel radii for cards, sheets, dialogs, and large inputs. Avoid mixing arbitrary radii.
+- Interactive controls have a minimum 48 by 48 logical-pixel hit target. Focus, pressed, selected, disabled, validation-error, and loading states are perceptible without color alone.
+- Shared component themes own app bars, navigation bars, FABs, filled/outlined/text buttons, text fields, chips, cards, list dividers, dialogs, snackbars, progress indicators, and bottom sheets. Individual screens should compose these patterns rather than restyle Material widgets ad hoc.
+
+### 13.4 Appearance preference architecture
+
+`ThemeMode.system` remains the default only until the user makes a choice. The authenticated shell exposes a Settings entry point (for example, an app-bar overflow/settings icon, not a fifth bottom-navigation destination) with three mutually exclusive appearance options: **System**, **Light**, and **Dark**.
+
+```text
+AppearancePreference (system | light | dark)
+          │ read/write non-sensitive local preferences
+          ▼
+AppearanceController / Riverpod provider
+          │ maps preference to ThemeMode
+          ▼
+MaterialApp(theme: lightTheme, darkTheme: darkTheme, themeMode: mode)
+```
+
+- Persist the enum value with a dedicated non-sensitive local-preference key such as `stoksync.appearance.v1`; do not put it in secure session storage, Drift domain tables, or sync payloads.
+- The controller initializes to `system` when no value exists, changes `ThemeMode` immediately after selection, and restores the choice before or during app composition without visibly flashing an incorrect theme.
+- The Settings control itself, the unauthenticated authentication flow, dialogs, pushed routes, scanner overlay, and every bottom-navigation destination must all rebuild from the same application theme.
+
+### 13.5 Navigation shell and shared states
+
+The primary navigation remains **Products**, **Movements**, **Sync**, and **Conflicts**, in that order. The refreshed shell uses a surface distinct from the page canvas, a clearly visible selected indicator, readable labels, and an accessible contrast treatment in both appearances. Each destination preserves its navigation stack when the user changes tabs.
+
+All shared screen states follow one pattern:
+
+- **Loading:** short plain-language status with a progress indicator and no empty-state imagery competing for attention.
+- **Empty:** a relevant icon, one-sentence explanation, and a single primary next action where an action is possible.
+- **Error/blocked:** semantic error or warning container, readable explanation, and a focused retry/resolve action; technical diagnostics remain secondary.
+- **Destructive confirmation:** explicit consequence, clear cancel/destructive action distinction, and no reliance on red text alone.
+
+### 13.6 Full-screen treatment
+
+| Area | Milestone 8 treatment |
+|---|---|
+| Authentication and registration | A compact, vertically scrollable auth layout with brand mark, confident heading, concise context, high-contrast filled fields, primary submit action, inline progress/error treatment, and a low-emphasis sign-in/create-account switch. Keep authentication behavior unchanged. |
+| Products browse | Page title and inventory context above a prominent search field; scannable product rows with name/SKU-barcode metadata, visually emphasized balance, low-stock semantic status, and a clear add/scan action. Empty and search-empty states use the shared pattern. |
+| Product detail | A balance-led summary surface, compact product identity block, clear low-stock treatment, grouped inventory/details sections, and recent movements. Edit/delete remain available but subordinate to stock actions. |
+| Product create/edit and destructive dialogs | Group related fields with clear section labels, consistent field spacing and helper/error states, a sticky or reliably reachable primary save action, and readable destructive confirmation. No validation or mutation semantics change. |
+| Movements history | A date-aware, cross-product list/timeline with type icon, product name, signed quantity emphasized by semantic direction, timestamp, and secondary note. Per-product history retains the same language. |
+| Receive, issue, adjustment, reversal, and stocktake | Use a focused task form: product context first, a visually distinct quantity/type control, note and time fields second, validation close to its control, and an unambiguous submit label. Ledger behavior remains unchanged. |
+| Sync | Lead with an understandable state title and last-successful-sync summary, then pending/conflict counts and a manual sync action. Retry/backoff/blocked details use semantic containers rather than raw status-code-like presentation. |
+| Conflicts list and detail | Use severity/reason labels, affected entity summary, and an obvious resolution action. Detail compares base, local, and server sections as structured label/value groups; all fields remain visible, while raw JSON is not the normal presentation. |
+| Barcode scanner | Retain the camera behavior, but apply a high-contrast dimmed overlay, clear scan frame, concise instruction, readable torch/close controls, and an unknown-code handoff that matches product creation styling. |
+| Settings | Provide the appearance selector with System, Light, and Dark options, an immediate selected indicator, and explanatory copy that System follows the device setting. |
+
+### 13.7 Verification and regression boundaries
+
+- Run each Milestone 8 task on the Pixel 8a Android emulator and inspect it in Light, Dark, and System modes before proceeding. Hot reload is sufficient for style-only changes; restart when initialization or preference persistence changes.
+- Widget tests cover token-driven component states, appearance-mode selection/persistence, navigation/settings entry points, form readability, and structural screen content. Existing functional tests remain the guard against accidental changes to local mutation, ledger, synchronization, or conflict behavior.
+- Perform a manual contrast review of every text-field state (empty, typed, focused, disabled, error), selected/unselected navigation state, status chips, buttons, dialogs, sheets, scanner controls, and conflict fields in both appearances.
+- Capture before/after emulator screenshots for the authentication screen, product browse/detail, a movement form, Sync, Conflicts detail, scanner, and Settings. A screen is not accepted merely because it compiles or has a passing widget test.

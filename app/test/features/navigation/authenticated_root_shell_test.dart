@@ -35,6 +35,19 @@ void main() {
     );
   });
 
+  testWidgets('opens Settings from the shell action without adding a tab', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_shellTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('open-settings-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byKey(const Key('appearance-settings-card')), findsOneWidget);
+  });
+
   testWidgets(
     'switches the selected destination without rebuilding the shell',
     (tester) async {

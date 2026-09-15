@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/appearance_controller.dart';
 import '../movements/movement_destination_page.dart';
 import '../products/product_pages.dart';
+import '../settings/settings_page.dart';
 import '../sync/conflict_pages.dart';
 import '../sync/sync_status_widgets.dart';
 
-/// The authenticated app shell and its four top-level destinations.
+/// The authenticated app shell and its four primary destinations.
 ///
-/// Feature pages remain responsible for their own pushed child routes. The
-/// shell only owns the selected destination, so authentication and sync
-/// orchestration can continue to be provided by the composition root.
+/// Settings is intentionally a shell action rather than a fifth primary tab so
+/// Products, Movements, Sync, and Conflicts remain the main workflow.
 class AuthenticatedRootShell extends StatefulWidget {
-  const AuthenticatedRootShell({super.key});
+  const AuthenticatedRootShell({super.key, this.appearanceController});
+
+  final AppearanceController? appearanceController;
 
   @override
   State<AuthenticatedRootShell> createState() => _AuthenticatedRootShellState();
@@ -19,6 +22,8 @@ class AuthenticatedRootShell extends StatefulWidget {
 
 class _AuthenticatedRootShellState extends State<AuthenticatedRootShell> {
   var _selectedIndex = 0;
+  late final AppearanceController _appearanceController;
+  var _ownsAppearanceController = false;
 
   static const _destinations = <NavigationDestination>[
     NavigationDestination(
@@ -58,20 +63,72 @@ class _AuthenticatedRootShellState extends State<AuthenticatedRootShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    final controller = widget.appearanceController;
+    if (controller == null) {
+      _appearanceController = AppearanceController.inMemory();
+      _ownsAppearanceController = true;
+    } else {
+      _appearanceController = controller;
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_ownsAppearanceController) {
+      _appearanceController.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: IndexedStack(
         key: const Key('authenticated-destination-stack'),
         index: _selectedIndex,
         children: _pages,
       ),
-      bottomNavigationBar: NavigationBar(
-        key: const Key('authenticated-navigation-bar'),
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
-        },
-        destinations: _destinations,
+      bottomNavigationBar: Material(
+        color: scheme.surface,
+        elevation: 2,
+        child: SafeArea(
+          top: false,
+          child: Row(
+            children: [
+              Expanded(
+                child: NavigationBar(
+                  key: const Key('authenticated-navigation-bar'),
+                  selectedIndex: _selectedIndex,
+                  onDestinationSelected: (index) {
+                    setState(() => _selectedIndex = index);
+                  },
+                  destinations: _destinations,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: IconButton(
+                  key: const Key('open-settings-button'),
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings_outlined),
+                  color: scheme.onSurfaceVariant,
+                  onPressed: _openSettings,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSettings() {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(controller: _appearanceController),
       ),
     );
   }

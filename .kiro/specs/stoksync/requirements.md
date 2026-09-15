@@ -171,24 +171,48 @@ StokSync is an offline-first Android/iOS inventory application for one account o
 
 **NFR-6 — Maintainability:** The project shall document key decisions, the sync protocol, and the conflict policy. Client and server schema changes shall be versioned with migrations.
 
-### 3.7 Visual system and navigation
+### 3.7 Presentation, appearance, and navigation
 
-**FR-20 — Theming**
+**FR-20 — Clean-SaaS visual foundation**
 
-- The app shall derive its light and dark color schemes from one Material 3 seed color using `ColorScheme.fromSeed`; individual colors shall not be hand-picked outside the seed.
-- The app shall follow the device's system light/dark setting rather than requiring a manual in-app theme toggle in v1.
+- The app shall use a clean SaaS / finance-dashboard visual direction: confident navy/blue brand emphasis, cool neutral surfaces, restrained elevation, clear information hierarchy, and purposeful use of whitespace.
+- The light and dark schemes shall be deliberately designed as paired token systems, not generated from a single seed alone. Each Material 3 `ColorScheme` role shall be assigned from the approved visual-token palette and used consistently by components.
+- A color may be introduced only as a named semantic token or a documented `ColorScheme` role. Feature widgets shall not introduce ad-hoc colors, brightness-specific literals, or locally invented shades.
+- The visual foundation shall provide distinct canvas, surface, elevated-surface, outline, primary-action, success, warning, and error treatments while preserving clear hierarchy without turning every section into a card.
 
-**FR-21 — Typography**
+**FR-21 — Appearance preference**
 
-- The app shall apply one consistent typeface across all screens by composing a Google Fonts family into the Material 3 `TextTheme`, rather than styling individual screens independently.
+- The app shall default to the device's current appearance on first launch.
+- The user shall be able to select and persist **System**, **Light**, or **Dark** appearance from an in-app Settings entry point reachable from the authenticated shell.
+- Changing the preference shall update the entire application immediately, including the authentication, navigation, scanner, product, movement, sync, and conflict flows, without requiring an app restart.
+- Appearance preference is non-sensitive local UI data and shall not affect authentication, offline inventory data, queueing, or synchronization behavior.
 
-**FR-22 — Primary navigation**
+**FR-22 — Typography, spacing, and component language**
+
+- The app shall apply Inter consistently through the Material 3 `TextTheme`, with role-based type scale and weights that establish clear page-title, section-title, body, metadata, and action hierarchy.
+- The app shall use a documented spacing, radius, icon, and touch-target scale across all screens rather than per-screen measurements.
+- Reusable component themes shall define the visual language for app bars, navigation, buttons, text fields, chips, cards, lists, dialogs, banners, FABs, and loading/empty/error states.
+
+**FR-23 — Primary navigation and settings**
 
 - The authenticated app shall present Products, Movements, Sync, and Conflicts as top-level destinations in a persistent bottom navigation bar.
+- The shell shall expose Settings without adding it as a fifth primary destination. Settings shall include the appearance preference defined in FR-21.
 - Product detail/edit, movement entry/reversal, barcode scanning, and conflict detail shall remain screens reached from their owning destination, not separate top-level destinations.
 - A cross-product movement history view shall be reachable from the Movements destination, showing recent movements across all products without altering ledger semantics or balance derivation.
 
-**FR-23 — Conflict payload readability**
+**FR-24 — Full-screen UX refresh**
+
+- The visual redesign shall cover every user-facing screen: authentication and registration; Products browse, detail, create/edit, and delete confirmation; Movements history, entry, reversal, and stocktake; Sync status; Conflicts list, detail, and resolution; barcode scanner; navigation shell; shared dialogs, sheets, loading, empty, and error states.
+- Product and movement information shall be scannable at a glance through consistent primary/secondary text, aligned metadata, quantity/status emphasis, and meaningful empty states. The redesign shall not change local-first reads, ledger semantics, mutation behavior, or sync behavior.
+- Sync and conflict screens shall communicate state through plain-language labels, semantic status treatments, and clear next actions before exposing technical diagnostics.
+
+**FR-25 — Dark-mode readability and accessibility**
+
+- In dark mode, editable text, labels, hints, helper/error text, icons, borders, selected navigation items, and status indicators shall remain visually distinct from their surfaces; typed text shall never inherit a low-contrast default or near-black value on a dark field.
+- Text and interactive controls shall meet WCAG 2.1 AA contrast requirements: at least 4.5:1 for normal text and 3:1 for large text and non-text UI components, except where an accessibility-standard exception applies.
+- Every interactive control shall retain a visible enabled, focused, pressed, selected, disabled, and error state in both appearances. Touch targets shall remain at least 48 by 48 logical pixels.
+
+**FR-26 — Conflict payload readability**
 
 - The conflict detail screen shall present base, local, and canonical server payload fields as labeled values rather than raw JSON, using human-readable labels for known product/movement fields.
 - Every field currently shown in a payload section shall remain visible after this change; no field shall be hidden or summarized away. A field with no known label shall still render using its raw key.
@@ -203,4 +227,4 @@ StokSync is an offline-first Android/iOS inventory application for one account o
 6. **Barcode collision:** Separate offline product creations use the same barcode. One succeeds; the other operation becomes a visible barcode conflict, not a duplicate active barcode.
 7. **Token expiry offline:** The user can continue viewing and recording locally while authentication refresh is unavailable. Synchronization becomes blocked and pending operations remain intact until reauthentication.
 8. **Stocktake:** Two devices submit stocktakes for the same product from stale balances. The server recomputes canonical deltas and applies the documented deterministic policy without corrupting the ledger.
-9. **Theme and navigation:** Switching the device between light and dark mode updates every screen's colors without an app restart. From any of the four bottom navigation destinations, the user can reach every screen listed in FR-22 without returning through the product catalog.
+9. **Appearance, contrast, and navigation:** On the Pixel 8a emulator, select each of System, Light, and Dark appearance from Settings. The whole app updates immediately without restart, preserves the selected preference after relaunch, and retains readable typed text, labels, borders, icons, and status treatments on every dark surface. Navigate to Products, Movements, Sync, and Conflicts and complete the core pushed flows for each destination. Conflict detail continues to show every base/local/server value as a labeled field with no raw JSON required for normal inspection.

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/local/local_query_providers.dart';
 import 'sync_trigger_coordinator.dart';
 import 'sync_trigger_providers.dart';
@@ -222,7 +223,20 @@ class SyncStatusDetailPage extends ConsumerWidget {
     final coordinator = ref.watch(syncTriggerCoordinatorProvider);
     return Scaffold(
       key: const Key('sync-destination-page'),
-      appBar: AppBar(title: const Text('Sync')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Sync'),
+            Text(
+              'Local-first delivery status',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: summary.when(
         loading: () => const _SyncStatusDetailLoading(),
         error: (_, _) => _SyncStatusDetailUnavailable(coordinator: coordinator),
@@ -248,14 +262,20 @@ class _SyncStatusDetailContent extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final lastSyncedAt = summary.lastSyncedAt;
     final error = summary.lastError?.trim();
+    final semantic = semanticColorsOf(context);
     final hasError = error != null && error.isNotEmpty;
-    final attentionRequired =
-        summary.status.trim().toLowerCase() == 'blocked' || hasError;
+    final statusValue = summary.status.trim().toLowerCase();
+    final attentionRequired = statusValue == 'blocked' || hasError;
+    final backingOff = statusValue == 'backing_off';
     final statusContainer = attentionRequired
         ? colorScheme.errorContainer
+        : backingOff
+        ? semantic.warningContainer
         : colorScheme.primaryContainer;
     final statusOnContainer = attentionRequired
         ? colorScheme.onErrorContainer
+        : backingOff
+        ? semantic.onWarningContainer
         : colorScheme.onPrimaryContainer;
 
     return ListView(

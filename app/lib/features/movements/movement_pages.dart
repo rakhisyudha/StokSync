@@ -68,7 +68,20 @@ class _MovementEntryPageState extends ConsumerState<MovementEntryPage> {
   Widget build(BuildContext context) {
     final inventory = ref.watch(productDetailProvider(widget.productId));
     return Scaffold(
-      appBar: AppBar(title: Text(widget.mode.title)),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.mode.title),
+            Text(
+              'Local ledger entry',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: inventory.when(
         loading: () => const _MovementStateMessage(
           key: Key('movement-entry-loading-state'),
@@ -130,7 +143,7 @@ class _MovementEntryPageState extends ConsumerState<MovementEntryPage> {
           Expanded(
             child: ListView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
               children: [
                 Text(widget.mode.title, style: theme.textTheme.headlineSmall),
                 const SizedBox(height: 6),
@@ -402,7 +415,20 @@ class _MovementReversalPageState extends ConsumerState<MovementReversalPage> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Reverse movement')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Reverse movement'),
+            Text(
+              'Create an auditable correction',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: Form(
         key: _formKey,
         child: Column(
@@ -411,7 +437,7 @@ class _MovementReversalPageState extends ConsumerState<MovementReversalPage> {
               child: ListView(
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 children: [
                   Text('Review reversal', style: theme.textTheme.headlineSmall),
                   const SizedBox(height: 6),

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/local/conflict_resolution_repository.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
@@ -16,7 +17,20 @@ class ConflictListPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final conflicts = ref.watch(conflictsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Conflicts')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Conflicts'),
+            Text(
+              'Review decisions that need attention',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: conflicts.when(
         loading: () => const _ConflictStateMessage(
           key: Key('conflicts-loading-state'),
@@ -182,13 +196,13 @@ class _ConflictListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final unresolved = conflict.resolutionStatus == 'unresolved';
-    final colorScheme = Theme.of(context).colorScheme;
+    final semantic = semanticColorsOf(context);
     final iconColor = unresolved
-        ? colorScheme.onErrorContainer
-        : colorScheme.onSecondaryContainer;
+        ? semantic.onWarningContainer
+        : semantic.onSuccessContainer;
     final iconBackground = unresolved
-        ? colorScheme.errorContainer
-        : colorScheme.secondaryContainer;
+        ? semantic.warningContainer
+        : semantic.successContainer;
 
     return Card(
       key: Key('conflict-row-${conflict.opId}'),
@@ -241,7 +255,20 @@ class ConflictDetailPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final conflict = ref.watch(conflictDetailProvider(operationId));
     return Scaffold(
-      appBar: AppBar(title: const Text('Conflict details')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Conflict details'),
+            Text(
+              'Compare local intent with canonical state',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: conflict.when(
         loading: () => const _ConflictStateMessage(
           key: Key('conflict-detail-loading-state'),

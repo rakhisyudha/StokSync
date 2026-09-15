@@ -470,6 +470,7 @@ final class _AuthPageFrame extends StatelessWidget {
     final textTheme = theme.textTheme;
 
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text('StokSync'),
         automaticallyImplyLeading: false,
@@ -477,59 +478,88 @@ final class _AuthPageFrame extends StatelessWidget {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
+            constraints: const BoxConstraints(maxWidth: 560),
             child: AutofillGroup(
               child: Semantics(
                 container: true,
                 label: semanticsLabel,
-                child: Form(
-                  key: formKey,
-                  child: ListView(
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-                    children: [
-                      Align(
-                        alignment: Alignment.center,
-                        child: DecoratedBox(
+                child: ListView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                  children: [
+                    Row(
+                      children: [
+                        DecoratedBox(
                           key: const Key('login-brand-mark'),
                           decoration: BoxDecoration(
                             color: colorScheme.primaryContainer,
-                            shape: BoxShape.circle,
+                            borderRadius: BorderRadius.circular(14),
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(12),
                             child: Icon(
                               Icons.inventory_2_outlined,
-                              size: 32,
+                              size: 28,
                               color: colorScheme.onPrimaryContainer,
                               semanticLabel: 'StokSync inventory',
                             ),
                           ),
                         ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'STOKSYNC',
+                              style: textTheme.labelLarge?.copyWith(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.4,
+                              ),
+                            ),
+                            Text(
+                              'LOCAL-FIRST INVENTORY',
+                              style: textTheme.labelSmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    Text(
+                      title,
+                      key: titleKey,
+                      style: textTheme.headlineSmall?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w800,
                       ),
-                      const SizedBox(height: 24),
-                      Text(
-                        title,
-                        key: titleKey,
-                        textAlign: TextAlign.center,
-                        style: textTheme.headlineSmall?.copyWith(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      description,
+                      style: textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Card(
+                      elevation: 1,
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Form(
+                          key: formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: children,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        description,
-                        textAlign: TextAlign.center,
-                        style: textTheme.bodyLarge?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                      ...children,
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -555,7 +585,7 @@ InputDecoration _authInputDecoration(ThemeData theme) {
   return InputDecoration(
     filled: true,
     fillColor: colorScheme.surfaceContainerHighest,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     border: inputBorder,
     enabledBorder: inputBorder,
     focusedBorder: focusedInputBorder,
@@ -566,6 +596,7 @@ InputDecoration _authInputDecoration(ThemeData theme) {
     ),
     floatingLabelStyle: theme.textTheme.bodyLarge?.copyWith(
       color: colorScheme.primary,
+      fontWeight: FontWeight.w700,
     ),
     hintStyle: theme.textTheme.bodyLarge?.copyWith(
       color: colorScheme.onSurfaceVariant,

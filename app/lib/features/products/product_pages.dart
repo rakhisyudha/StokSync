@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/local/local_mutation_repositories.dart';
 import '../../data/local/local_query_providers.dart';
 import '../../data/local/stoksync_database.dart';
@@ -33,7 +34,18 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Products'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Products'),
+            Text(
+              'Local inventory workspace',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             key: const Key('scan-product-button'),
@@ -54,7 +66,7 @@ class _ProductBrowsePageState extends ConsumerState<ProductBrowsePage> {
         children: [
           const LocalSyncStatusCard(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: TextField(
               key: const Key('product-search-field'),
               controller: _searchController,
@@ -304,31 +316,39 @@ class _ProductCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(16),
+                  color: isLowStock
+                      ? colorScheme.errorContainer
+                      : colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(13),
                   child: Icon(
-                    Icons.inventory_2_outlined,
-                    color: colorScheme.onPrimaryContainer,
+                    isLowStock
+                        ? Icons.inventory_2_outlined
+                        : Icons.inventory_2_outlined,
+                    color: isLowStock
+                        ? colorScheme.onErrorContainer
+                        : colorScheme.onPrimaryContainer,
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       product.name,
-                      style: theme.textTheme.titleMedium,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -355,17 +375,22 @@ class _ProductCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${inventory.quantity} ${product.unit}',
-                    style: theme.textTheme.titleMedium,
+                    '${inventory.quantity}',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: isLowStock
+                          ? colorScheme.error
+                          : colorScheme.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
                     textAlign: TextAlign.end,
                   ),
                   Text(
-                    'in stock',
-                    style: theme.textTheme.bodySmall?.copyWith(
+                    product.unit,
+                    style: theme.textTheme.labelMedium?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Icon(
                     Icons.chevron_right,
                     color: colorScheme.onSurfaceVariant,
@@ -385,11 +410,22 @@ class _LowStockChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final semantic = semanticColorsOf(context);
     return Chip(
-      avatar: const Icon(Icons.warning_amber_rounded, size: 16),
+      avatar: Icon(
+        Icons.warning_amber_rounded,
+        size: 16,
+        color: semantic.onWarningContainer,
+      ),
       label: const Text('Low stock'),
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
+      backgroundColor: semantic.warningContainer,
+      side: BorderSide(color: semantic.warning),
+      labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+        color: semantic.onWarningContainer,
+        fontWeight: FontWeight.w700,
+      ),
     );
   }
 }
@@ -467,7 +503,7 @@ class ProductDetailPage extends ConsumerWidget {
           ),
           body: SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -964,13 +1000,28 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title),
+            Text(
+              widget.isEditing
+                  ? 'Update local catalog details'
+                  : 'Add to local catalog',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -978,7 +1029,10 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
                   widget.isEditing
                       ? 'Update the details for this product.'
                       : 'Create a product for your local catalog.',
-                  style: theme.textTheme.bodyLarge,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Card(
@@ -990,7 +1044,16 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
                       children: [
                         Text(
                           'Product information',
-                          style: theme.textTheme.titleMedium,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Identity and lookup details',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         TextFormField(
@@ -1058,7 +1121,16 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
                       children: [
                         Text(
                           'Stock settings',
-                          style: theme.textTheme.titleMedium,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Define how inventory should be monitored',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         TextFormField(
